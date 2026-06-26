@@ -1,25 +1,6 @@
 #!/usr/bin/env python3
-import argparse, os, sys, subprocess
-
-def main():
-  parser = argparse.ArgumentParser(description="Car Security Logger")
-  parser.add_argument("--config", "-c", help="Path to custom config.json")
-  args = parser.parse_args()
-
-  repo_dir = os.path.dirname(os.path.abspath(__file__))
-  main_py = os.path.join(repo_dir, "main.py")
-
-  if not os.path.exists(main_py):
-    print("Error: car-logger not found. Clone it first:")
-    print("  git clone https://github.com/YOUR_USER/car-logger.git")
-    sys.exit(1)
-
-  env = os.environ.copy()
-  if args.config:
-    env["CARLOGGER_CONFIG"] = args.config
-
-  os.chdir(repo_dir)
-  os.execve(sys.executable, [sys.executable, main_py] + sys.argv[1:], env)
-
-if __name__ == "__main__":
-  main()
+import os, sys, runpy
+repo = os.path.dirname(os.path.abspath(__file__))
+os.chdir(repo)
+sys.path.insert(0, repo)
+runpy.run_path(os.path.join(repo, "main.py"), run_name="__main__")
