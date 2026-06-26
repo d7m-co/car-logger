@@ -14,6 +14,7 @@
       <span class="indicator" id="indicator-ws">🔌 <span>--</span></span>
       <span class="indicator" id="indicator-camera">📷 <span>Starting...</span></span>
       <span class="indicator" id="indicator-ai">🤖 <span>AI: --</span></span>
+      <span class="indicator" id="indicator-queue" style="display:none">📨 <span></span></span>
       <span class="indicator" id="indicator-loc">📍 <span>Loc: --</span></span>
       <a href="/settings" class="btn-icon">⚙</a>
     </div>
@@ -51,7 +52,7 @@
     </div>
     <div class="controls">
       <a href="/history" class="btn">📋 History</a>
-      <a href="/health" class="btn">🩺 Health</a>
+      <a href="/health" class="btn">🏥 Health</a>
       <a href="/settings" class="btn">⚙ Settings</a>
     </div>
   </footer>
@@ -71,12 +72,28 @@
       </div>
       <div class="modal-info">
         <div class="modal-info-row">
+          <span class="modal-info-label">Result</span>
+          <span class="modal-info-value" id="modal-ai-label">--</span>
+        </div>
+        <div class="modal-info-row">
           <span class="modal-info-label">Time</span>
           <span class="modal-info-value" id="modal-time">--</span>
         </div>
         <div class="modal-info-row">
           <span class="modal-info-label">Location</span>
           <span class="modal-info-value" id="modal-location">--</span>
+        </div>
+        <div class="modal-info-row">
+          <span class="modal-info-label">Confidence</span>
+          <span class="modal-info-value" id="modal-confidence">--</span>
+        </div>
+        <div class="modal-info-row">
+          <span class="modal-info-label">Vehicle</span>
+          <span class="modal-info-value" id="modal-vehicle">--</span>
+        </div>
+        <div class="modal-info-row" id="modal-raw-row" style="display:none">
+          <span class="modal-info-label">AI Raw</span>
+          <span class="modal-info-value" id="modal-raw" style="font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow-y:auto">--</span>
         </div>
         <div class="modal-info-row">
           <span class="modal-info-label">ID</span>

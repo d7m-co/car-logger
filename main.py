@@ -51,7 +51,7 @@ def print_banner(config, port):
   print("  ╚═══════════════════════════════════════════╝")
   print("")
 
-def create_app(config, detector, logger, location_obj, camera):
+def create_app(config, detector, logger, location_obj, camera, plate_reader):
   from flask import Flask, send_from_directory, request, jsonify, Response
   from flask_socketio import SocketIO
 
@@ -146,6 +146,7 @@ def create_app(config, detector, logger, location_obj, camera):
       "model": config.get("openrouter_model"),
       "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
       "stats": logger.get_stats(),
+      "ai_queue": plate_reader.queue_size if plate_reader else 0,
     })
 
   @app.route("/health")
@@ -179,6 +180,7 @@ def create_app(config, detector, logger, location_obj, camera):
       "cpu_percent": cpu,
       "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
       "stats": logger.get_stats(),
+      "ai_queue": plate_reader.queue_size if plate_reader else 0,
     })
 
   @socketio.on("connect")
@@ -214,6 +216,10 @@ def log_ai_result(config, logger, location_obj, broadcast_func, ai_result, captu
         "vehicle_info": "AI error",
         "image_path": None,
         "lat": lat, "lon": lon,
+        "confidence": "none",
+        "color": "",
+        "make": "",
+        "raw_ai": "",
       })
     return
 
@@ -260,6 +266,10 @@ def log_ai_result(config, logger, location_obj, broadcast_func, ai_result, captu
       "vehicle_info": vehicle_info,
       "image_path": image_path,
       "lat": lat, "lon": lon,
+      "confidence": ai_result.get("confidence", "none"),
+      "color": ai_result.get("color", ""),
+      "make": ai_result.get("make", ""),
+      "raw_ai": ai_result.get("raw", ""),
     })
 
 
@@ -337,7 +347,7 @@ def main():
   port = config.get("server_port", 5000)
   print_banner(config, port)
 
-  app, socketio = create_app(config, detector, logger, location_obj, camera)
+  app, socketio = create_app(config, detector, logger, location_obj, camera, plate_reader)
 
   detection_history = []
 

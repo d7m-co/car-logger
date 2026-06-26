@@ -50,12 +50,18 @@
         <div class="health-label">Location</div>
         <div class="health-value" id="h-location"><div class="skeleton" style="height:18px;width:130px"></div></div>
       </div>
+      <div class="health-card" data-key="ai_queue">
+        <div class="health-label">AI Queue</div>
+        <div class="health-value" id="h-ai-queue"><div class="skeleton" style="height:18px;width:80px"></div></div>
+      </div>
       <div class="health-card health-card-wide" data-key="stats">
         <div class="health-label">Detections</div>
         <div class="health-stats-row" id="h-stats">
-          <div class="health-stat-item"><span class="health-stat-num"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Today</span></div>
-          <div class="health-stat-item"><span class="health-stat-num"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Total</span></div>
-          <div class="health-stat-item"><span class="health-stat-num"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Unique</span></div>
+          <div class="health-stat-item"><span class="health-stat-num" id="h-today"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Cars (today)</span></div>
+          <div class="health-stat-item"><span class="health-stat-num" id="h-cars"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Cars</span></div>
+          <div class="health-stat-item"><span class="health-stat-num" id="h-non-cars"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Non-cars</span></div>
+          <div class="health-stat-item"><span class="health-stat-num" id="h-errors"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Errors</span></div>
+          <div class="health-stat-item"><span class="health-stat-num" id="h-unique"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Plates</span></div>
         </div>
       </div>
     </div>
@@ -75,6 +81,7 @@ function fillHealth() {
     if (p.id === "h-memory") { p.textContent = "--"; return; }
     if (p.id === "h-cpu") { p.textContent = "--"; return; }
     if (p.id === "h-location") { p.textContent = "--"; return; }
+    if (p.id === "h-ai-queue") { p.textContent = "--"; return; }
     s.remove();
   });
   // Restore stat placeholders
@@ -144,8 +151,13 @@ async function loadHealth() {
 
     var stats = h.stats || {};
     document.getElementById("h-today").textContent = stats.today || 0;
-    document.getElementById("h-total").textContent = stats.total || 0;
+    document.getElementById("h-cars").textContent = stats.cars || 0;
+    document.getElementById("h-non-cars").textContent = stats.non_cars || 0;
+    document.getElementById("h-errors").textContent = stats.errors || 0;
     document.getElementById("h-unique").textContent = stats.unique || 0;
+
+    var q = h.ai_queue || 0;
+    document.getElementById("h-ai-queue").textContent = q + " queued" + (q > 0 ? "" : "");
 
   } catch(e) {
     document.getElementById("health-loading").textContent = "Failed to load health data";

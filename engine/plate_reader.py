@@ -14,6 +14,10 @@ class PlateReader:
     self._worker = None
     self._running = False
 
+  @property
+  def queue_size(self):
+    return self._queue.qsize()
+
   def start(self):
     self._running = True
     self._worker = threading.Thread(target=self._worker_loop, daemon=True)

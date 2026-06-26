@@ -80,6 +80,7 @@ document.addEventListener("DOMContentLoaded", function() {
   const badgeCars = document.getElementById("badge-cars");
   const indCamera = document.getElementById("indicator-camera");
   const indAI = document.getElementById("indicator-ai");
+  const indQueue = document.getElementById("indicator-queue");
   const indLoc = document.getElementById("indicator-loc");
   const indWs = document.getElementById("indicator-ws");
   const feedImg = document.getElementById("live-feed");
@@ -176,6 +177,10 @@ document.addEventListener("DOMContentLoaded", function() {
     item.dataset.lon = data.lon || 0;
     item.dataset.id = data.id || "";
     item.dataset.aiLabel = data.ai_label || "";
+    item.dataset.confidence = data.confidence || "";
+    item.dataset.color = data.color || "";
+    item.dataset.make = data.make || "";
+    item.dataset.rawAi = data.raw_ai || "";
     item.innerHTML =
       '<div class="plate">' + (data.plate || aiLabelHtml(data.ai_label)) + '</div>' +
       '<div class="info">' +
@@ -198,6 +203,9 @@ document.addEventListener("DOMContentLoaded", function() {
 
   function openModal(d) {
     document.getElementById("modal-plate").textContent = d.plate || "UNKNOWN";
+    document.getElementById("modal-ai-label").innerHTML = aiLabelHtml(d.aiLabel) || "--";
+    document.getElementById("modal-confidence").textContent = d.confidence || "--";
+    document.getElementById("modal-vehicle").textContent = (d.color && d.color + " " + d.make) || d.vehicle || "--";
     var ts = (d.time || "").split(".")[0].replace("T", " ");
     document.getElementById("modal-time").textContent = ts || "--";
     if (d.lat && d.lon) {
@@ -206,6 +214,14 @@ document.addEventListener("DOMContentLoaded", function() {
       document.getElementById("modal-location").textContent = "Unknown";
     }
     document.getElementById("modal-id").textContent = d.id || "--";
+    var rawEl = document.getElementById("modal-raw");
+    var rawRow = document.getElementById("modal-raw-row");
+    if (d.rawai) {
+      rawEl.textContent = d.rawai;
+      rawRow.style.display = "flex";
+    } else {
+      rawRow.style.display = "none";
+    }
 
     var img = document.getElementById("modal-image");
     var fallback = document.getElementById("modal-image-fallback");
@@ -264,6 +280,15 @@ document.addEventListener("DOMContentLoaded", function() {
         indAI.className = "indicator error";
       }
 
+      var q = s.ai_queue || 0;
+      if (q > 0) {
+        indQueue.style.display = "inline-flex";
+        indQueue.innerHTML = "📨 <span>" + q + " queued</span>";
+        indQueue.className = "indicator active";
+      } else {
+        indQueue.style.display = "none";
+      }
+
       var loc = s.location || {};
       var lat = loc.lat || 0;
       var lon = loc.lon || 0;
@@ -288,6 +313,7 @@ document.addEventListener("DOMContentLoaded", function() {
       indAI.className = "indicator error";
       indLoc.innerHTML = "📍 <span>Server unreachable</span>";
       indLoc.className = "indicator error";
+      if (indQueue) indQueue.style.display = "none";
       statusFailed = true;
     }
   }
