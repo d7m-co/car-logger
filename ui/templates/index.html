@@ -23,13 +23,11 @@
       <div class="feed-header">
         <h2>Live Feed</h2>
         <div class="feed-badges">
-          <span class="badge" id="badge-status">⏳</span>
           <span class="badge" id="badge-cars">🚘 0</span>
         </div>
       </div>
       <div class="feed-container">
         <img id="live-feed" src="/video_feed" alt="Live camera feed">
-        <div class="zone-preview" id="zone-overlay"></div>
       </div>
     </div>
 
@@ -58,6 +56,7 @@
 </div>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>window.io = window.io || null;</script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

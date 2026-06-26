@@ -44,6 +44,9 @@ class PlateReader:
       "max_tokens": 200
     }
 
+    now = time.time()
+    self._last_call = now
+
     try:
       r = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
@@ -56,7 +59,6 @@ class PlateReader:
         json=payload,
         timeout=30
       )
-      self._last_call = time.time()
       if r.status_code != 200:
         return None
       data = r.json()

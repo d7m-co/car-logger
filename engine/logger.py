@@ -1,4 +1,4 @@
-import sqlite3, os, time, threading
+import sqlite3, os, threading, time
 from datetime import datetime, timezone
 
 class Logger:
@@ -36,16 +36,15 @@ class Logger:
   def is_duplicate(self, plate, window_seconds=None):
     if window_seconds is None:
       window_seconds = self.config.get("dedup_seconds", 60)
-    cutoff = datetime.now(timezone.utc).isoformat()
     with self.lock:
       cur = self.conn.execute(
-        "SELECT COUNT(*) FROM plates WHERE plate = ? AND timestamp > datetime('now', ?)",
+        "SELECT COUNT(*) FROM plates WHERE plate = ? AND created_at > datetime('now', ?)",
         (plate, f"-{window_seconds} seconds")
       )
       return cur.fetchone()[0] > 0
 
   def log(self, plate, lat=None, lon=None, image_path=None, vehicle_info=None, raw_ai=None):
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}Z"
     with self.lock:
       self.conn.execute(
         "INSERT INTO plates (plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response) VALUES (?, ?, ?, ?, ?, ?, ?)",

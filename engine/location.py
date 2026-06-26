@@ -1,4 +1,5 @@
 import subprocess, json, threading, time
+import requests
 
 class Location:
   def __init__(self, config):
@@ -64,14 +65,13 @@ class Location:
     if loc:
       with self._lock:
         self.lat, self.lon = loc
-        if self.config.get("location_auto"):
-          self.config.set_many({"location_lat": self.lat, "location_lon": self.lon})
     self._last_refresh = time.time()
+    return self.lat, self.lon
 
   def get(self):
     if self.config.get("location_auto"):
       interval = self.config.get("location_refresh_minutes", 10) * 60
       if time.time() - self._last_refresh > interval:
-        threading.Thread(target=self._refresh, daemon=True).start()
+        return self._refresh()
     with self._lock:
       return self.lat, self.lon

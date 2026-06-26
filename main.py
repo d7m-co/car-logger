@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-import os, sys, json, time, threading, webbrowser
+import os, sys, json, time, threading, webbrowser, signal
 from pathlib import Path
 
 os.chdir(Path(__file__).parent)
 
 import cv2
-import numpy as np
 from PIL import Image
 
 from config import Config
@@ -13,8 +12,26 @@ from engine.detector import Detector
 from engine.plate_reader import PlateReader
 from engine.logger import Logger
 from engine.location import Location
+from server.camera_stream import CameraStream
 
 RUNNING = True
+latest_frame = None
+frame_lock = threading.Lock()
+LOCATION_CACHE = (0.0, 0.0)
+
+def signal_handler(sig, frame):
+  global RUNNING
+  RUNNING = False
+  print("\n  ⏹ Shutting down...")
+
+def annotate_frame(frame_in):
+  global latest_frame
+  with frame_lock:
+    latest_frame = frame_in
+
+def get_annotated_frame():
+  with frame_lock:
+    return latest_frame.copy() if latest_frame is not None else None
 
 def print_banner(config, port):
   print("")
@@ -33,16 +50,95 @@ def print_banner(config, port):
   print("  ╚═══════════════════════════════════════════╝")
   print("")
 
-def engine_loop(config, broadcast_func):
-  from server.camera_stream import CameraStream
-  global RUNNING
+def create_app(config, detector, logger, location_obj, camera):
+  from flask import Flask, send_from_directory, request, jsonify, Response
+  from flask_socketio import SocketIO
 
-  detector = Detector(config)
-  plate_reader = PlateReader(config) if config.api_key_set else None
-  logger = Logger(config)
-  location = Location(config) if config.get("location_auto") else None
+  app = Flask(__name__, template_folder="ui/templates", static_folder="ui/static")
+  app.config["SECRET_KEY"] = os.urandom(16).hex()
+  socketio = SocketIO(app, cors_allowed_origins="*")
 
-  camera = CameraStream(config)
+  camera_started = False
+
+  @app.route("/")
+  def index():
+    return send_from_directory("ui/templates", "index.html")
+
+  @app.route("/settings")
+  def settings_page():
+    return send_from_directory("ui/templates", "settings.html")
+
+  @app.route("/history")
+  def history_page():
+    return send_from_directory("ui/templates", "history.html")
+
+  @app.route("/snaps/<path:filename>")
+  def serve_snap(filename):
+    return send_from_directory(config.get("snaps_dir", "data/snaps"), filename)
+
+  @app.route("/video_feed")
+  def video_feed():
+    nonlocal camera_started
+    if not camera_started:
+      camera.start()
+      time.sleep(1)
+      camera_started = True
+
+    def gen():
+      while RUNNING:
+        annotated = get_annotated_frame()
+        if annotated is None:
+          time.sleep(0.05)
+          continue
+        ret, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        if not ret:
+          continue
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
+    return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+  @app.route("/api/config", methods=["GET"])
+  def get_config():
+    return jsonify(config.data)
+
+  @app.route("/api/config", methods=["POST"])
+  def set_config():
+    data = request.get_json()
+    if data:
+      config.set_many(data)
+      return jsonify({"status": "ok"})
+    return jsonify({"status": "error"}), 400
+
+  @app.route("/api/history")
+  def get_history():
+    limit = request.args.get("limit", 100, type=int)
+    offset = request.args.get("offset", 0, type=int)
+    search = request.args.get("search")
+    rows = logger.get_history(limit=limit, offset=offset, search=search)
+    return jsonify(rows)
+
+  @app.route("/api/stats")
+  def get_stats():
+    return jsonify(logger.get_stats())
+
+  @app.route("/api/status")
+  def get_status():
+    global LOCATION_CACHE
+    return jsonify({
+      "camera": camera.is_opened,
+      "api_key": bool(config.get("openrouter_api_key")),
+      "model": config.get("openrouter_model"),
+      "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
+      "stats": logger.get_stats(),
+    })
+
+  @socketio.on("connect")
+  def handle_connect():
+    pass
+
+  return app, socketio
+
+def engine_loop(config, camera, detector, plate_reader, logger, location_obj, broadcast_func):
+  global RUNNING, LOCATION_CACHE
   camera.start()
   time.sleep(1.5)
 
@@ -52,13 +148,14 @@ def engine_loop(config, broadcast_func):
       broadcast_func({"type": "error", "msg": "Camera not found"})
     return
 
-  print(f"  📷 Camera started")
+  print("  📷 Camera started")
   print("  🟢 Waiting for cars...")
   print("")
 
   lat, lon = 0.0, 0.0
-  if location:
-    lat, lon = location.get()
+  if location_obj:
+    lat, lon = location_obj.get()
+    LOCATION_CACHE = (lat, lon)
 
   while RUNNING:
     frame = camera.read()
@@ -67,6 +164,7 @@ def engine_loop(config, broadcast_func):
       continue
 
     result = detector.process(frame)
+    annotate_frame(result["frame"])
 
     if result.get("idle"):
       time.sleep(0.3)
@@ -84,6 +182,10 @@ def engine_loop(config, broadcast_func):
         crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
         pil_image = Image.fromarray(crop_rgb)
         plate_info = plate_reader.read_plate(pil_image)
+
+      if location_obj:
+        lat, lon = location_obj.get()
+        LOCATION_CACHE = (lat, lon)
 
       ms = int(time.time() * 1000) % 1000
       ts = time.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
@@ -111,10 +213,8 @@ def engine_loop(config, broadcast_func):
                     [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
 
       logger.log(
-        plate=plate_number,
-        lat=lat, lon=lon,
-        image_path=image_path,
-        vehicle_info=vehicle_info,
+        plate=plate_number, lat=lat, lon=lon,
+        image_path=image_path, vehicle_info=vehicle_info,
         raw_ai=json.dumps(plate_info) if plate_info else None
       )
 
@@ -133,123 +233,11 @@ def engine_loop(config, broadcast_func):
   camera.stop()
   logger.close()
 
-def start_web(config):
-  from flask import Flask, send_from_directory, request, jsonify, Response
-  from flask_socketio import SocketIO, emit
-
-  app = Flask(__name__, template_folder="ui/templates", static_folder="ui/static")
-  app.config["SECRET_KEY"] = os.urandom(16).hex()
-  socketio = SocketIO(app, cors_allowed_origins="*")
-
-  detection_history = []
-
-  def broadcast(data):
-    socketio.emit("new_detection", data)
-
-  def annotate_frame(frame):
-    from engine.detector import Detector
-    d = Detector(config)
-    r = d.process(frame)
-    return r["frame"]
-
-  from server.camera_stream import CameraStream
-  camera_stream = CameraStream(config)
-
-  @app.route("/")
-  def index():
-    return send_from_directory("ui/templates", "index.html")
-
-  @app.route("/settings")
-  def settings_page():
-    return send_from_directory("ui/templates", "settings.html")
-
-  @app.route("/history")
-  def history_page():
-    return send_from_directory("ui/templates", "history.html")
-
-  @app.route("/snaps/<path:filename>")
-  def serve_snap(filename):
-    return send_from_directory(config.get("snaps_dir", "data/snaps"), filename)
-
-  @app.route("/video_feed")
-  def video_feed():
-    if not camera_stream.is_opened:
-      camera_stream.start()
-      time.sleep(1)
-    return Response(
-      camera_stream.gen_frames(),
-      mimetype="multipart/x-mixed-replace; boundary=frame"
-    )
-
-  @app.route("/api/config", methods=["GET"])
-  def get_config():
-    return jsonify(config.data)
-
-  @app.route("/api/config", methods=["POST"])
-  def set_config():
-    data = request.get_json()
-    if data:
-      config.set_many(data)
-      return jsonify({"status": "ok"})
-    return jsonify({"status": "error"}), 400
-
-  @app.route("/api/history")
-  def get_history():
-    limit = request.args.get("limit", 100, type=int)
-    offset = request.args.get("offset", 0, type=int)
-    search = request.args.get("search")
-    db = Logger(config)
-    rows = db.get_history(limit=limit, offset=offset, search=search)
-    db.close()
-    return jsonify(rows)
-
-  @app.route("/api/stats")
-  def get_stats():
-    db = Logger(config)
-    s = db.get_stats()
-    db.close()
-    return jsonify(s)
-
-  @app.route("/api/status")
-  def get_status():
-    db = Logger(config)
-    s = db.get_stats()
-    db.close()
-    return jsonify({
-      "camera": True,
-      "api_key": bool(config.get("openrouter_api_key")),
-      "model": config.get("openrouter_model"),
-      "location": {"lat": config.get("location_lat"), "lon": config.get("location_lon")},
-      "stats": s,
-    })
-
-  @socketio.on("connect")
-  def handle_connect():
-    pass
-
-  port = config.get("server_port", 5000)
-  host = "0.0.0.0"
-
-  def broadcast_func(data):
-    detection_history.append(data)
-    if len(detection_history) > 500:
-      detection_history.pop(0)
-    socketio.emit("new_detection", data)
-
-  print(f"  🌐 Web server: http://{host}:{port}")
-  webbrowser.open(f"http://localhost:{port}")
-
-  engine_thread = threading.Thread(
-    target=engine_loop, args=(config, broadcast_func), daemon=True
-  )
-  engine_thread.start()
-
-  try:
-    socketio.run(app, host=host, port=port, debug=False, log_output=False, allow_unsafe_werkzeug=True)
-  except KeyboardInterrupt:
-    pass
-
 def main():
+  global RUNNING
+  signal.signal(signal.SIGINT, signal_handler)
+  signal.signal(signal.SIGTERM, signal_handler)
+
   config = Config()
 
   if not config.api_key_set:
@@ -257,8 +245,39 @@ def main():
     print("  ⚠ Open the dashboard → Settings → paste your key.")
     print("")
 
-  print_banner(config, config.get("server_port", 5000))
-  start_web(config)
+  detector = Detector(config)
+  plate_reader = PlateReader(config) if config.api_key_set else None
+  logger = Logger(config)
+  location_obj = Location(config) if config.get("location_auto") else None
+  camera = CameraStream(config)
+
+  port = config.get("server_port", 5000)
+  print_banner(config, port)
+
+  detection_history = []
+
+  def broadcast_func(data):
+    detection_history.append(data)
+    if len(detection_history) > 500:
+      detection_history.pop(0)
+
+  app, socketio = create_app(config, detector, logger, location_obj, camera)
+
+  engine_thread = threading.Thread(
+    target=engine_loop,
+    args=(config, camera, detector, plate_reader, logger, location_obj, broadcast_func),
+    daemon=True
+  )
+  engine_thread.start()
+
+  webbrowser.open(f"http://localhost:{port}")
+
+  try:
+    socketio.run(app, host="0.0.0.0", port=port, debug=False, log_output=False, allow_unsafe_werkzeug=True)
+  except KeyboardInterrupt:
+    RUNNING = False
+
+  print("  ✅ Car Logger stopped.")
 
 if __name__ == "__main__":
   main()
