@@ -8,7 +8,7 @@ class PlateReader:
     self.config = config
     self.api_key = config.get("openrouter_api_key", "")
     self.model = config.get("openrouter_model", "openrouter/free")
-    self._req_queue = queue.Queue(maxsize=500)
+    self._req_queue = queue.Queue()  # unlimited
     self._last_api_call = 0
     self._base_api_interval = 10.0
     self._cooldown_until = 0.0
@@ -118,14 +118,9 @@ class PlateReader:
         "error": None,
       }
       self._requests[req_id] = req
-    try:
-      self._req_queue.put_nowait((req_id, pil_image, callback))
-      self._notify()
-      return req_id
-    except queue.Full:
-      with self._lock:
-        self._requests.pop(req_id, None)
-      return None
+    self._req_queue.put_nowait((req_id, pil_image, callback))
+    self._notify()
+    return req_id
 
   def _encode_image(self, pil_image, max_size=640):
     w, h = pil_image.size
