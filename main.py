@@ -4,7 +4,7 @@ from pathlib import Path
 
 os.chdir(Path(__file__).parent)
 
-import cv2
+import cv2, psutil
 from PIL import Image
 
 from config import Config
@@ -15,6 +15,7 @@ from engine.location import Location
 from server.camera_stream import CameraStream
 
 RUNNING = True
+START_TIME = time.time()
 latest_frame = None
 frame_lock = threading.Lock()
 LOCATION_CACHE = (0.0, 0.0)
@@ -56,7 +57,7 @@ def create_app(config, detector, logger, location_obj, camera):
 
   app = Flask(__name__, template_folder="ui/templates", static_folder="ui/static")
   app.config["SECRET_KEY"] = os.urandom(16).hex()
-  socketio = SocketIO(app, cors_allowed_origins="*")
+  socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
   camera_started = False
 
@@ -72,7 +73,7 @@ def create_app(config, detector, logger, location_obj, camera):
   def history_page():
     return send_from_directory("ui/templates", "history.html")
 
-  @app.route("/snaps/<path:filename>")
+  @app.route("/snaps/<filename>")
   def serve_snap(filename):
     return send_from_directory(config.get("snaps_dir", "data/snaps"), filename)
 
@@ -106,7 +107,7 @@ def create_app(config, detector, logger, location_obj, camera):
     if data:
       config.set_many(data)
       return jsonify({"status": "ok"})
-    return jsonify({"status": "error"}), 400
+    return jsonify({"status": "error", "message": "No settings data received. Try again."}), 400
 
   @app.route("/api/history")
   def get_history():
@@ -116,9 +117,24 @@ def create_app(config, detector, logger, location_obj, camera):
     rows = logger.get_history(limit=limit, offset=offset, search=search)
     return jsonify(rows)
 
+  @app.route("/api/plates")
+  def get_known_plates():
+    return jsonify(logger.get_known_plates())
+
   @app.route("/api/stats")
   def get_stats():
     return jsonify(logger.get_stats())
+
+  @app.route("/api/history", methods=["DELETE"])
+  def delete_history():
+    if request.args.get("all"):
+      count = logger.delete_all()
+      return jsonify({"deleted": count})
+    ids = request.get_json()
+    if not ids or not isinstance(ids, list):
+      return jsonify({"error": "Send a JSON array of IDs to delete"}), 400
+    count = logger.delete_by_ids(ids)
+    return jsonify({"deleted": count})
 
   @app.route("/api/status")
   def get_status():
@@ -127,6 +143,39 @@ def create_app(config, detector, logger, location_obj, camera):
       "camera": camera.is_opened,
       "api_key": bool(config.get("openrouter_api_key")),
       "model": config.get("openrouter_model"),
+      "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
+      "stats": logger.get_stats(),
+    })
+
+  @app.route("/health")
+  def health_page():
+    return send_from_directory("ui/templates", "health.html")
+
+  @app.route("/api/health")
+  def get_health():
+    global START_TIME, LOCATION_CACHE
+    uptime_seconds = int(time.time() - START_TIME)
+    db_path = config.get("db_path", "data/plates.db")
+    db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+    snaps_dir = config.get("snaps_dir", "data/snaps")
+    disk = psutil.disk_usage(snaps_dir if os.path.exists(snaps_dir) else ".")
+    mem = psutil.virtual_memory()
+    cpu = psutil.cpu_percent(interval=0.3)
+    row_count = 0
+    try:
+      row_count = logger.get_stats()["total"]
+    except: pass
+    return jsonify({
+      "uptime": uptime_seconds,
+      "camera": {"connected": camera.is_opened},
+      "api": {
+        "key_set": bool(config.get("openrouter_api_key")),
+        "model": config.get("openrouter_model"),
+      },
+      "database": {"size_bytes": db_size, "rows": row_count},
+      "disk": {"free_bytes": disk.free, "total_bytes": disk.total, "percent_used": disk.percent},
+      "memory": {"percent": mem.percent, "available_bytes": mem.available, "total_bytes": mem.total},
+      "cpu_percent": cpu,
       "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
       "stats": logger.get_stats(),
     })
@@ -177,11 +226,20 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
       if crop.size == 0:
         crop = raw
 
-      plate_info = None
-      if plate_reader:
-        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-        pil_image = Image.fromarray(crop_rgb)
-        plate_info = plate_reader.read_plate(pil_image)
+      if not plate_reader:
+        continue
+
+      crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+      pil_image = Image.fromarray(crop_rgb)
+      ai_result = plate_reader.read_plate(pil_image)
+
+      # AI error (timeout, rate limit, etc.) → skip
+      if ai_result is None:
+        continue
+
+      # AI says it's not a car (person, pet, etc.) → skip
+      if not ai_result.get("is_car"):
+        continue
 
       if location_obj:
         lat, lon = location_obj.get()
@@ -190,14 +248,11 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
       ms = int(time.time() * 1000) % 1000
       ts = time.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
 
-      plate_number = "UNKNOWN"
-      vehicle_info = ""
-      if plate_info and plate_info.get("plate"):
-        plate_number = plate_info["plate"]
-        parts = []
-        if plate_info.get("color"): parts.append(plate_info["color"])
-        if plate_info.get("make"): parts.append(plate_info["make"])
-        vehicle_info = " ".join(parts)
+      plate_number = ai_result.get("plate") or "UNKNOWN"
+      parts = []
+      if ai_result.get("color"): parts.append(ai_result["color"])
+      if ai_result.get("make"): parts.append(ai_result["make"])
+      vehicle_info = " ".join(parts)
 
       if plate_number != "UNKNOWN" and logger.is_duplicate(plate_number):
         print(f"  [{time.strftime('%H:%M:%S')}] ⏭ {plate_number:10s} | DUPLICATE")
@@ -208,21 +263,23 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
         snaps_dir = config.get("snaps_dir", "data/snaps")
         os.makedirs(snaps_dir, exist_ok=True)
         fname = f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-{plate_number.replace(' ','_')}.jpg"
-        image_path = os.path.join(snaps_dir, fname)
-        cv2.imwrite(image_path, result["raw_frame"],
+        cv2.imwrite(os.path.join(snaps_dir, fname), result["raw_frame"],
                     [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
+        image_path = fname
 
-      logger.log(
+      _, row_id = logger.log(
         plate=plate_number, lat=lat, lon=lon,
         image_path=image_path, vehicle_info=vehicle_info,
-        raw_ai=json.dumps(plate_info) if plate_info else None
+        raw_ai=json.dumps(ai_result) if ai_result else None
       )
 
-      print(f"  [{time.strftime('%H:%M:%S')}] 📸 {plate_number:10s} | {vehicle_info or 'N/A':20s}")
+      label = f"{plate_number:10s}" if plate_number != "UNKNOWN" else "UNKNOWN   "
+      print(f"  [{time.strftime('%H:%M:%S')}] 📸 {label} | {vehicle_info or 'N/A':20s}")
 
       if broadcast_func:
         broadcast_func({
           "type": "detection",
+          "id": row_id,
           "plate": plate_number,
           "timestamp": ts,
           "vehicle_info": vehicle_info,
@@ -254,14 +311,18 @@ def main():
   port = config.get("server_port", 5000)
   print_banner(config, port)
 
+  app, socketio = create_app(config, detector, logger, location_obj, camera)
+
   detection_history = []
 
   def broadcast_func(data):
     detection_history.append(data)
     if len(detection_history) > 500:
       detection_history.pop(0)
-
-  app, socketio = create_app(config, detector, logger, location_obj, camera)
+    try:
+      socketio.emit("new_detection", data)
+    except:
+      pass
 
   engine_thread = threading.Thread(
     target=engine_loop,

@@ -5,3 +5,4 @@ pillow>=10.0
 requests>=2.31
 numpy>=1.26
 eventlet>=0.33
+psutil>=5.9

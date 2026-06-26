@@ -16,12 +16,14 @@
   </header>
 
   <div class="settings-page">
-    <h1>⚙ Settings</h1>
+    <h1><a href="/" class="back-link">←</a> Settings</h1>
 
     <section class="settings-group">
       <h3>OpenRouter AI</h3>
       <label>API Key</label>
       <input type="password" id="api-key" placeholder="sk-or-v1-..." class="input">
+      <span class="help-text">Get a free key at <a href="https://openrouter.ai/keys" target="_blank" class="help-link">openrouter.ai/keys</a>. Required for license plate reading.</span>
+
       <label>Model</label>
       <select id="model" class="input">
         <option value="meta-llama/llama-3.2-11b-vision-instruct:free">Llama 3.2 Vision (free)</option>
@@ -29,19 +31,26 @@
         <option value="openai/gpt-4o">GPT-4o (paid)</option>
         <option value="qwen/qwen-vl-plus:free">Qwen VL Plus (free)</option>
       </select>
+      <span class="help-text">The AI model that reads license plates from crop images.</span>
     </section>
 
     <section class="settings-group">
       <h3>Detection</h3>
-      <label>Sensitivity</label>
+      <label>Sensitivity <span class="help-inline" id="sens-label">50</span></label>
       <input type="range" id="sensitivity" min="10" max="100" value="50" class="slider">
-      <label>Min Car Size</label>
-      <input type="number" id="min-car-area" class="input" style="width:100px">
-      <label>Dedup Window (seconds)</label>
-      <input type="number" id="dedup-seconds" class="input" style="width:100px">
+      <span class="help-text">Higher values detect smaller movements. Adjust if you get too many or too few triggers.</span>
+
+      <label>Min Car Size (pixels)</label>
+      <input type="number" id="min-car-area" class="input input-sm" min="100" max="10000" placeholder="500">
+      <span class="help-text">Smallest car area to detect. Lower = more sensitive to distant cars.</span>
+
+      <label>Duplicate Window (seconds)</label>
+      <input type="number" id="dedup-seconds" class="input input-sm" min="10" max="3600" placeholder="60">
+      <span class="help-text">Ignore repeat sightings of the same plate within this window. Prevents duplicates.</span>
+
       <label>Resolution</label>
       <select id="resolution" class="input">
-        <option value="640,480">640x480 (Low, battery)</option>
+        <option value="640,480">640x480 (Low, battery savings)</option>
         <option value="720,480" selected>720x480 (Default)</option>
         <option value="1280,720">1280x720 (HD)</option>
       </select>
@@ -49,76 +58,125 @@
 
     <section class="settings-group">
       <h3>Location</h3>
-      <label><input type="checkbox" id="location-auto" checked> Auto (WiFi)</label>
+      <label><input type="checkbox" id="location-auto" checked> Auto locate (WiFi)</label>
       <div id="manual-loc" style="display:none">
         <label>Latitude</label>
-        <input type="number" step="any" id="loc-lat" class="input" style="width:180px">
+        <input type="number" step="any" id="loc-lat" class="input input-md" min="-90" max="90" placeholder="0.0">
         <label>Longitude</label>
-        <input type="number" step="any" id="loc-lon" class="input" style="width:180px">
+        <input type="number" step="any" id="loc-lon" class="input input-md" min="-180" max="180" placeholder="0.0">
       </div>
+      <span class="help-text">Auto uses WiFi geolocation. Manual lets you set a fixed position.</span>
     </section>
 
     <section class="settings-group">
       <h3>Server</h3>
       <label>Port</label>
-      <input type="number" id="server-port" class="input" style="width:100px">
+      <input type="number" id="server-port" class="input input-sm" min="1024" max="65535" placeholder="5000">
+      <span class="help-text">The dashboard port. Must be between 1024 and 65535. Restart required to change.</span>
     </section>
 
     <div class="settings-actions">
-      <button class="btn primary" id="btn-save">💾 Save</button>
+      <button class="btn primary" id="btn-save">Save</button>
+      <a href="/" class="btn">Cancel</a>
       <span id="save-msg" class="save-msg"></span>
     </div>
   </div>
 </div>
 
 <script>
+function getEl(id) { return document.getElementById(id); }
+
+var _configLoaded = false;
+
 async function loadConfig() {
-  const r = await fetch("/api/config");
-  const cfg = await r.json();
-  document.getElementById("api-key").value = cfg.openrouter_api_key || "";
-  document.getElementById("model").value = cfg.openrouter_model;
-  document.getElementById("sensitivity").value = cfg.sensitivity;
-  document.getElementById("min-car-area").value = cfg.min_car_area;
-  document.getElementById("dedup-seconds").value = cfg.dedup_seconds;
-  document.getElementById("resolution").value = cfg.resolution.join(",");
-  document.getElementById("location-auto").checked = cfg.location_auto;
-  document.getElementById("loc-lat").value = cfg.location_lat;
-  document.getElementById("loc-lon").value = cfg.location_lon;
-  document.getElementById("server-port").value = cfg.server_port;
-  toggleManualLoc();
+  try {
+    const r = await fetch("/api/config");
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const cfg = await r.json();
+    getEl("api-key").value = cfg.openrouter_api_key || "";
+    getEl("model").value = cfg.openrouter_model;
+    getEl("sensitivity").value = cfg.sensitivity;
+    getEl("sens-label").textContent = cfg.sensitivity;
+    getEl("min-car-area").value = cfg.min_car_area;
+    getEl("dedup-seconds").value = cfg.dedup_seconds;
+    getEl("resolution").value = cfg.resolution.join(",");
+    getEl("location-auto").checked = cfg.location_auto;
+    getEl("loc-lat").value = cfg.location_lat;
+    getEl("loc-lon").value = cfg.location_lon;
+    getEl("server-port").value = cfg.server_port;
+    toggleManualLoc();
+    _configLoaded = true;
+  } catch(e) {
+    showMsg("Failed to load settings: " + e.message, "error");
+  }
 }
 
 function toggleManualLoc() {
-  document.getElementById("manual-loc").style.display =
-    document.getElementById("location-auto").checked ? "none" : "block";
+  getEl("manual-loc").style.display =
+    getEl("location-auto").checked ? "none" : "block";
 }
 
-document.getElementById("location-auto").addEventListener("change", toggleManualLoc);
+getEl("location-auto").addEventListener("change", toggleManualLoc);
 
-document.getElementById("btn-save").addEventListener("click", async () => {
-  const body = {
-    openrouter_api_key: document.getElementById("api-key").value,
-    openrouter_model: document.getElementById("model").value,
-    sensitivity: parseInt(document.getElementById("sensitivity").value),
-    min_car_area: parseInt(document.getElementById("min-car-area").value),
-    dedup_seconds: parseInt(document.getElementById("dedup-seconds").value),
-    resolution: document.getElementById("resolution").value.split(",").map(Number),
-    location_auto: document.getElementById("location-auto").checked,
-    location_lat: parseFloat(document.getElementById("loc-lat").value) || 0,
-    location_lon: parseFloat(document.getElementById("loc-lon").value) || 0,
-    server_port: parseInt(document.getElementById("server-port").value),
-  };
-  const r = await fetch("/api/config", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body) });
-  const msg = document.getElementById("save-msg");
-  if (r.ok) {
-    msg.textContent = "✅ Saved!";
-    msg.style.color = "#4ade80";
-  } else {
-    msg.textContent = "❌ Failed";
-    msg.style.color = "#f87171";
-  }
-  setTimeout(() => msg.textContent = "", 3000);
+getEl("sensitivity").addEventListener("input", function() {
+  getEl("sens-label").textContent = this.value;
 });
+
+function readVal(id, fallback) {
+  var v = parseFloat(getEl(id).value);
+  return isNaN(v) ? fallback : v;
+}
+
+var saving = false;
+
+getEl("btn-save").addEventListener("click", async function() {
+  if (saving) return;
+  saving = true;
+  var btn = getEl("btn-save");
+  btn.textContent = "Saving...";
+  btn.disabled = true;
+
+  var body = {
+    openrouter_api_key: getEl("api-key").value,
+    openrouter_model: getEl("model").value,
+    sensitivity: parseInt(getEl("sensitivity").value),
+    min_car_area: readVal("min-car-area", 500),
+    dedup_seconds: readVal("dedup-seconds", 60),
+    resolution: getEl("resolution").value.split(",").map(Number),
+    location_auto: getEl("location-auto").checked,
+    location_lat: readVal("loc-lat", 0),
+    location_lon: readVal("loc-lon", 0),
+    server_port: readVal("server-port", 5000),
+  };
+
+  try {
+    var r = await fetch("/api/config", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+    if (r.ok) {
+      showMsg("Saved successfully", "ok");
+    } else {
+      var emsg = "Save failed";
+      try { var ej = await r.json(); if (ej.message) emsg = ej.message; } catch(e) {}
+      showMsg(emsg, "error");
+    }
+  } catch(e) {
+    showMsg("Save failed: " + e.message, "error");
+  }
+
+  saving = false;
+  btn.textContent = "Save";
+  btn.disabled = false;
+});
+
+function showMsg(text, type) {
+  var msg = getEl("save-msg");
+  msg.textContent = text;
+  msg.className = "save-msg " + (type === "ok" ? "ok" : "err");
+  setTimeout(function() { msg.textContent = ""; msg.className = "save-msg"; }, 5000);
+}
 
 loadConfig();
 </script>

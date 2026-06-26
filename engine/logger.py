@@ -46,12 +46,13 @@ class Logger:
   def log(self, plate, lat=None, lon=None, image_path=None, vehicle_info=None, raw_ai=None):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}Z"
     with self.lock:
-      self.conn.execute(
+      cur = self.conn.execute(
         "INSERT INTO plates (plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (plate, ts, lat, lon, image_path, vehicle_info, raw_ai)
       )
       self.conn.commit()
-    return ts
+      row_id = cur.lastrowid
+    return ts, row_id
 
   def get_history(self, limit=100, offset=0, search=None):
     with self.lock:
@@ -69,6 +70,13 @@ class Logger:
       cols = [d[0] for d in cur.description]
       return [dict(zip(cols, r)) for r in rows]
 
+  def get_known_plates(self, limit=50):
+    with self.lock:
+      cur = self.conn.execute(
+        "SELECT DISTINCT plate FROM plates ORDER BY id DESC LIMIT ?", (limit,)
+      )
+      return [r[0] for r in cur.fetchall()]
+
   def get_stats(self):
     with self.lock:
       today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -80,6 +88,23 @@ class Logger:
         "SELECT COUNT(DISTINCT plate) FROM plates"
       ).fetchone()[0]
       return {"total": total, "today": today_count, "unique": unique}
+
+  def delete_by_ids(self, ids):
+    if not ids:
+      return 0
+    placeholders = ",".join("?" for _ in ids)
+    with self.lock:
+      cur = self.conn.execute(
+        f"DELETE FROM plates WHERE id IN ({placeholders})", ids
+      )
+      self.conn.commit()
+      return cur.rowcount
+
+  def delete_all(self):
+    with self.lock:
+      cur = self.conn.execute("DELETE FROM plates")
+      self.conn.commit()
+      return cur.rowcount
 
   def close(self):
     self.conn.close()

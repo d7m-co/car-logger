@@ -21,7 +21,7 @@ class Detector:
     zx2 = int(w * zone[2] / 100)
     zy2 = int(h * zone[3] / 100)
 
-    blurred = cv2.GaussianBlur(frame, (5, 5))
+    blurred = cv2.GaussianBlur(frame, (5, 5), 0)
     gray = cv2.cvtColor(blurred, cv2.COLOR_BGR2GRAY)
     fg_mask = self.bg_subtractor.apply(gray)
     fg_mask = cv2.morphologyEx(fg_mask, cv2.MORPH_OPEN, self.kernel)
@@ -38,7 +38,12 @@ class Detector:
         continue
       x, y, bw, bh = cv2.boundingRect(cnt)
       aspect = bw / max(bh, 1)
-      if aspect < 0.3 or aspect > 5.0:
+      # Cars are wider than tall (aspect > 1.0) from typical camera angle.
+      # People/pets are taller than wide (aspect < 0.6).
+      if aspect < 0.8 or aspect > 3.0:
+        continue
+      # Car bottom should be near ground (lower 60% of frame)
+      if y + bh < h * 0.4:
         continue
       cx, cy = x + bw // 2, y + bh // 2
       cars.append({"bbox": (x, y, bw, bh), "center": (cx, cy), "area": area})

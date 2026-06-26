@@ -35,7 +35,7 @@ class PlateReader:
         {
           "role": "user",
           "content": [
-            {"type": "text", "text": "Extract the license plate number from this car image. Return ONLY valid JSON with fields: plate (string), color (string), make (string), confidence (high/medium/low). If no plate visible, return {\"plate\": null, \"confidence\": \"none\"}."},
+            {"type": "text", "text": "Look at this image. First decide: is there a car visible? Return ONLY valid JSON with fields: is_car (boolean), plate (string or null), color (string), make (string), confidence (high/medium/low/none). If it's not a car, set is_car to false and plate to null. If it is a car but plate is unreadable, set is_car to true and plate to null."},
             {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}
           ]
         }
@@ -64,14 +64,14 @@ class PlateReader:
       data = r.json()
       content = data["choices"][0]["message"]["content"]
       parsed = json.loads(content)
-      if parsed.get("plate"):
-        return {
-          "plate": parsed["plate"].strip().upper(),
-          "color": parsed.get("color", ""),
-          "make": parsed.get("make", ""),
-          "confidence": parsed.get("confidence", "low"),
-          "raw": content
-        }
+      return {
+        "is_car": parsed.get("is_car", False),
+        "plate": parsed["plate"].strip().upper() if parsed.get("plate") else None,
+        "color": parsed.get("color", ""),
+        "make": parsed.get("make", ""),
+        "confidence": parsed.get("confidence", "none"),
+        "raw": content
+      }
     except Exception:
       pass
     return None

@@ -16,64 +16,243 @@
   </header>
 
   <div class="history-page">
-    <h1>📋 Detection History</h1>
+    <div class="history-header">
+      <h1><a href="/" class="back-link">←</a> Detection History</h1>
+      <span class="history-count" id="history-count"></span>
+    </div>
     <div class="search-bar">
-      <input type="text" id="search-input" placeholder="Search by plate..." class="input" style="flex:1">
-      <button class="btn primary" id="btn-search">🔍</button>
-      <button class="btn" id="btn-refresh">🔄</button>
+      <input type="text" id="search-input" placeholder="Search by plate number..." class="input" style="flex:1" list="plate-list" autocomplete="off">
+      <datalist id="plate-list"></datalist>
+      <button class="btn primary" id="btn-search">Search</button>
+      <button class="btn" id="btn-refresh">Refresh</button>
+      <button class="btn" id="btn-export">Export CSV</button>
     </div>
     <div class="history-table-wrap">
       <table class="history-table">
         <thead>
           <tr>
+            <th style="width:36px"><input type="checkbox" id="select-all" aria-label="Select all"></th>
             <th>Plate</th>
-            <th>Timestamp</th>
+            <th>Time</th>
             <th>Vehicle</th>
             <th>Location</th>
-            <th>Image</th>
+            <th>Snap</th>
           </tr>
         </thead>
         <tbody id="history-body"></tbody>
       </table>
     </div>
-    <div class="history-loading" id="history-loading">Loading...</div>
+    <div id="history-footer" class="history-footer">
+      <button class="btn" id="btn-load-more" style="display:none">Load more</button>
+      <button class="btn btn-danger" id="btn-delete-selected" style="display:none">Delete selected</button>
+      <button class="btn btn-danger" id="btn-wipe">Wipe all</button>
+      <div class="history-loading" id="history-loading">Loading...</div>
+    </div>
   </div>
 </div>
 
 <script>
-async function loadHistory(search) {
-  document.getElementById("history-loading").style.display = "block";
-  let url = "/api/history?limit=200";
-  if (search) url += "&search=" + encodeURIComponent(search);
-  const r = await fetch(url);
-  const rows = await r.json();
-  const tbody = document.getElementById("history-body");
+var PAGE_SIZE = 100;
+var currentOffset = 0;
+var currentSearch = "";
+var loading = false;
+var hasMore = true;
+var allRows = [];
+
+function getEl(id) { return document.getElementById(id); }
+
+function showSkeleton() {
+  var tbody = getEl("history-body");
   tbody.innerHTML = "";
-  if (rows.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="5" class="empty">No detections yet</td></tr>';
-  } else {
-    for (const row of rows) {
-      const tr = document.createElement("tr");
-      const imgFile = row.image_path ? row.image_path.split("/").pop() : null;
-      tr.innerHTML = '<td class="plate-cell">' + row.plate + '</td>' +
-        '<td class="ts-cell">' + (row.timestamp || row.created_at) + '</td>' +
-        '<td>' + (row.vehicle_info || "--") + '</td>' +
-        '<td>' + (row.latitude ? row.latitude.toFixed(4) + ", " + row.longitude.toFixed(4) : "--") + '</td>' +
-        '<td>' + (row.image_path ? '<a href="/snaps/' + imgFile + '" target="_blank">📷 View</a>' : "--") + '</td>';
-      tbody.appendChild(tr);
-    }
+  for (var i = 0; i < 6; i++) {
+    var tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td><div class="skeleton" style="width:16px;height:16px;margin:auto"></div></td>' +
+      '<td><div class="skeleton" style="height:16px;width:80px"></div></td>' +
+      '<td><div class="skeleton" style="height:16px;width:140px"></div></td>' +
+      '<td><div class="skeleton" style="height:16px;width:60px"></div></td>' +
+      '<td><div class="skeleton" style="height:16px;width:100px"></div></td>' +
+      '<td><div class="skeleton" style="height:16px;width:40px"></div></td>';
+    tbody.appendChild(tr);
   }
-  document.getElementById("history-loading").style.display = "none";
 }
 
-document.getElementById("btn-search").addEventListener("click", function() {
-  loadHistory(document.getElementById("search-input").value);
+async function loadHistory(search, append) {
+  if (loading) return;
+  loading = true;
+
+  if (!append) {
+    currentOffset = 0;
+    hasMore = true;
+    allRows = [];
+    showSkeleton();
+  }
+
+  var url = "/api/history?limit=" + PAGE_SIZE + "&offset=" + currentOffset;
+  if (search) url += "&search=" + encodeURIComponent(search);
+
+  try {
+    var r = await fetch(url);
+    if (!r.ok) throw new Error("Server returned " + r.status);
+    var rows = await r.json();
+    var tbody = getEl("history-body");
+
+    if (!append) tbody.innerHTML = "";
+
+    if (rows.length === 0 && !append) {
+      tbody.innerHTML = '<tr><td colspan="6" class="empty">No detections yet. Park near a camera to start logging.</td></tr>';
+      getEl("btn-load-more").style.display = "none";
+      hasMore = false;
+    } else {
+      for (const row of rows) {
+        allRows.push(row);
+        var tr = document.createElement("tr");
+        var imgFile = row.image_path ? row.image_path.split("/").pop() : null;
+        tr.dataset.id = row.id;
+        tr.innerHTML =
+          '<td><input type="checkbox" class="row-check" data-id="' + row.id + '" aria-label="Select row"></td>' +
+          '<td class="plate-cell">' + row.plate + '</td>' +
+          '<td class="ts-cell">' + (row.timestamp || row.created_at || "").split(".")[0].replace("T", " ") + '</td>' +
+          '<td>' + (row.vehicle_info || "--") + '</td>' +
+          '<td>' + (row.latitude ? row.latitude.toFixed(4) + ", " + row.longitude.toFixed(4) : "--") + '</td>' +
+          '<td>' + (imgFile ? '<a href="/snaps/' + imgFile + '" target="_blank">View</a>' : "--") + '</td>';
+        tbody.appendChild(tr);
+      }
+      currentOffset += rows.length;
+      hasMore = rows.length >= PAGE_SIZE;
+      getEl("btn-load-more").style.display = hasMore ? "inline-block" : "none";
+    }
+  } catch(e) {
+    getEl("history-body").innerHTML = '<tr><td colspan="6" class="empty">Could not load history. The server may be restarting — try refreshing in a moment.</td></tr>';
+  }
+
+  try {
+    var sr = await fetch("/api/stats");
+    if (sr.ok) {
+      var st = await sr.json();
+      getEl("history-count").textContent = "(" + (st.total || 0) + " total)";
+    }
+  } catch(e) {}
+
+  getEl("history-loading").style.display = "none";
+  loading = false;
+}
+
+getEl("btn-search").addEventListener("click", function() {
+  currentSearch = getEl("search-input").value;
+  loadHistory(currentSearch, false);
 });
-document.getElementById("search-input").addEventListener("keyup", function(e) {
-  if (e.key === "Enter") loadHistory(e.target.value);
+getEl("search-input").addEventListener("keyup", function(e) {
+  if (e.key === "Enter") {
+    currentSearch = e.target.value;
+    loadHistory(currentSearch, false);
+  }
 });
-document.getElementById("btn-refresh").addEventListener("click", function() { loadHistory(); });
-loadHistory();
+getEl("btn-refresh").addEventListener("click", function() {
+  loadHistory(getEl("search-input").value, false);
+});
+getEl("btn-load-more").addEventListener("click", function() {
+  loadHistory(currentSearch, true);
+});
+
+getEl("btn-export").addEventListener("click", function() {
+  if (allRows.length === 0) return;
+  var headers = ["id","plate","timestamp","vehicle_info","latitude","longitude","image_path"];
+  var csv = headers.join(",") + "\n";
+  for (var r of allRows) {
+    csv += headers.map(function(h) {
+      var v = r[h] !== null && r[h] !== undefined ? String(r[h]).replace(/"/g, '""') : "";
+      return '"' + v + '"';
+    }).join(",") + "\n";
+  }
+  var blob = new Blob([csv], {type: "text/csv"});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "car-logger-detections-" + new Date().toISOString().slice(0,10) + ".csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+// Select all toggle
+getEl("select-all").addEventListener("change", function() {
+  var checks = document.querySelectorAll(".row-check");
+  for (var c of checks) c.checked = this.checked;
+  updateDeleteBtn();
+});
+
+// Update delete button visibility
+document.addEventListener("change", function(e) {
+  if (e.target.classList.contains("row-check")) updateDeleteBtn();
+});
+
+function updateDeleteBtn() {
+  var checked = document.querySelectorAll(".row-check:checked").length;
+  getEl("btn-delete-selected").style.display = checked > 0 ? "inline-block" : "none";
+}
+
+getEl("btn-delete-selected").addEventListener("click", async function() {
+  var ids = [];
+  var checks = document.querySelectorAll(".row-check:checked");
+  for (var c of checks) ids.push(c.dataset.id);
+  if (ids.length === 0) return;
+  if (!confirm("Delete " + ids.length + " detection(s)? This cannot be undone.")) return;
+
+  getEl("btn-delete-selected").textContent = "Deleting...";
+  getEl("btn-delete-selected").disabled = true;
+
+  try {
+    var r = await fetch("/api/history", {
+      method: "DELETE",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(ids)
+    });
+    if (r.ok) {
+      loadHistory(currentSearch, false);
+    } else {
+      var err = await r.json();
+      alert("Delete failed: " + (err.error || r.status));
+    }
+  } catch(e) {
+    alert("Delete failed: " + e.message);
+  }
+
+  getEl("btn-delete-selected").textContent = "Delete selected";
+  getEl("btn-delete-selected").disabled = false;
+});
+
+getEl("btn-wipe").addEventListener("click", async function() {
+  if (!confirm("WIPE ALL DETECTION HISTORY?\n\nThis will permanently delete every detection in the database. This cannot be undone.\n\nAre you sure?")) return;
+
+  getEl("btn-wipe").textContent = "Wiping...";
+  getEl("btn-wipe").disabled = true;
+
+  try {
+    var r = await fetch("/api/history?all=1", { method: "DELETE" });
+    if (r.ok) {
+      var result = await r.json();
+loadHistory("", false);
+
+// Populate plate autocomplete
+fetch("/api/plates").then(function(r) { return r.json(); }).then(function(plates) {
+  var dl = getEl("plate-list");
+  for (var p of plates) {
+    var opt = document.createElement("option");
+    opt.value = p;
+    dl.appendChild(opt);
+  }
+}).catch(function() {});
+    } else {
+      alert("Wipe failed: " + r.status);
+    }
+  } catch(e) {
+    alert("Wipe failed: " + e.message);
+  }
+
+  getEl("btn-wipe").textContent = "Wipe all";
+  getEl("btn-wipe").disabled = false;
+});
+
+loadHistory("", false);
 </script>
 </body>
 </html>
