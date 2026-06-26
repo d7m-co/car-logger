@@ -81,6 +81,16 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
   def history_page():
     return send_from_directory("ui/templates", "history.html")
 
+  @app.route("/queue")
+  def queue_page():
+    return send_from_directory("ui/templates", "queue.html")
+
+  @app.route("/api/queue")
+  def get_queue():
+    if not plate_reader:
+      return jsonify([])
+    return jsonify(plate_reader.get_requests(50))
+
   @app.route("/snaps/<path:filename>")
   def serve_snap(filename):
     sanitized = os.path.basename(filename)
@@ -126,6 +136,8 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
     if not filtered:
       return jsonify({"status": "error", "message": "No valid settings keys."}), 400
     config.set_many(filtered)
+    if "openrouter_api_key" in filtered and plate_reader:
+      plate_reader.api_key = filtered["openrouter_api_key"]
     return jsonify({"status": "ok"})
 
   @app.route("/api/history")
@@ -166,6 +178,7 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
       "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
       "stats": logger.get_stats(),
       "ai_queue": plate_reader.queue_size if plate_reader else 0,
+      "ai_current": plate_reader.current_request_id if plate_reader else None,
     })
 
   @app.route("/health")
@@ -200,7 +213,9 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
       "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
       "stats": logger.get_stats(),
       "ai_queue": plate_reader.queue_size if plate_reader else 0,
+      "ai_current": plate_reader.current_request_id if plate_reader else None,
     })
+
 
   @socketio.on("connect")
   def handle_connect():
@@ -209,6 +224,7 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
   return app, socketio
 
 def log_ai_result(config, logger, location_obj, broadcast_func, ai_result, capture_info):
+  global LOCATION_CACHE
   lat, lon = LOCATION_CACHE
   if location_obj:
     lat, lon = location_obj.get()
@@ -332,7 +348,7 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
       if crop.size == 0:
         crop = raw
 
-      if not plate_reader:
+      if not plate_reader or not plate_reader.api_key:
         continue
 
       capture_info = {"raw_frame": raw}
@@ -356,11 +372,11 @@ def main():
     print("")
 
   detector = Detector(config)
-  plate_reader = PlateReader(config) if config.api_key_set else None
+  plate_reader = PlateReader(config)
   logger = Logger(config)
   location_obj = Location(config) if config.get("location_auto") else None
   camera = CameraStream(config)
-  if plate_reader:
+  if plate_reader.api_key:
     plate_reader.start()
 
   port = config.get("server_port", 5000)
@@ -378,6 +394,14 @@ def main():
       socketio.emit("new_detection", data)
     except:
       pass
+
+  if plate_reader:
+    def on_queue_update(reqs):
+      try:
+        socketio.emit("queue_update", reqs)
+      except:
+        pass
+    plate_reader.set_on_update(on_queue_update)
 
   engine_thread = threading.Thread(
     target=engine_loop,

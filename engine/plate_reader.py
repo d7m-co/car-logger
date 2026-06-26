@@ -7,16 +7,33 @@ class PlateReader:
   def __init__(self, config):
     self.config = config
     self.api_key = config.get("openrouter_api_key", "")
-    self.model = config.get("openrouter_model", "meta-llama/llama-3.2-11b-vision-instruct:free")
+    self.model = config.get("openrouter_model", "openrouter/free")
     self._last_call = 0
     self._min_interval = 2.0
-    self._queue = queue.Queue(maxsize=20)
+    self._req_queue = queue.Queue(maxsize=20)
     self._worker = None
     self._running = False
+    self._lock = threading.Lock()
+    self._requests = {}
+    self._next_id = 1
+    self._current_id = None
+    self._on_update = None
+
+  def set_on_update(self, callback):
+    self._on_update = callback
 
   @property
   def queue_size(self):
-    return self._queue.qsize()
+    return self._req_queue.qsize()
+
+  @property
+  def current_request_id(self):
+    return self._current_id
+
+  def get_requests(self, limit=50):
+    with self._lock:
+      items = sorted(self._requests.values(), key=lambda r: r["queued_at"], reverse=True)
+      return items[:limit]
 
   def start(self):
     self._running = True
@@ -26,12 +43,36 @@ class PlateReader:
   def stop(self):
     self._running = False
 
+  def _notify(self):
+    if self._on_update:
+      try:
+        self._on_update(self.get_requests(20))
+      except:
+        pass
+
   def _worker_loop(self):
     while self._running:
       try:
-        item = self._queue.get(timeout=1)
-        pil_image, callback = item
+        item = self._req_queue.get(timeout=1)
+        req_id, pil_image, callback = item
+        self._current_id = req_id
+        with self._lock:
+          if req_id in self._requests:
+            self._requests[req_id]["status"] = "processing"
+            self._requests[req_id]["started_at"] = time.time()
+        self._notify()
         result = self._do_read_plate(pil_image)
+        self._current_id = None
+        with self._lock:
+          if req_id in self._requests:
+            if result is None:
+              self._requests[req_id]["status"] = "error"
+              self._requests[req_id]["error"] = "API request failed"
+            else:
+              self._requests[req_id]["status"] = "completed"
+              self._requests[req_id]["result"] = result
+            self._requests[req_id]["completed_at"] = time.time()
+        self._notify()
         if callback:
           callback(result)
       except queue.Empty:
@@ -39,15 +80,32 @@ class PlateReader:
 
   def queue_plate(self, pil_image, callback=None):
     if not self.api_key:
-      return
+      return None
     now = time.time()
     if now - self._last_call < self._min_interval:
-      return
+      return None
     self._last_call = now
+    with self._lock:
+      req_id = self._next_id
+      self._next_id += 1
+      req = {
+        "id": req_id,
+        "status": "queued",
+        "queued_at": now,
+        "started_at": None,
+        "completed_at": None,
+        "result": None,
+        "error": None,
+      }
+      self._requests[req_id] = req
     try:
-      self._queue.put_nowait((pil_image, callback))
+      self._req_queue.put_nowait((req_id, pil_image, callback))
+      self._notify()
+      return req_id
     except queue.Full:
-      pass
+      with self._lock:
+        self._requests.pop(req_id, None)
+      return None
 
   def _encode_image(self, pil_image, max_size=640):
     w, h = pil_image.size

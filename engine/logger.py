@@ -36,6 +36,14 @@ class Logger:
       self.conn.execute("ALTER TABLE plates ADD COLUMN ai_label TEXT DEFAULT 'unknown'")
     except:
       pass
+    try:
+      self.conn.execute("ALTER TABLE plates RENAME TO plates_old")
+      self.conn.execute("CREATE TABLE plates (id INTEGER PRIMARY KEY AUTOINCREMENT, plate TEXT, timestamp TEXT NOT NULL, latitude REAL, longitude REAL, image_path TEXT, vehicle_info TEXT, raw_ai_response TEXT, ai_label TEXT DEFAULT 'unknown', created_at TEXT DEFAULT (datetime('now')))")
+      self.conn.execute("INSERT INTO plates (id, plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response, ai_label, created_at) SELECT id, plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response, COALESCE(ai_label, 'unknown'), created_at FROM plates_old")
+      self.conn.execute("DROP TABLE plates_old")
+      self.conn.commit()
+    except:
+      self.conn.rollback()
     self.conn.commit()
 
   def is_duplicate(self, plate, window_seconds=None):
