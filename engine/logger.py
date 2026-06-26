@@ -14,13 +14,14 @@ class Logger:
     self.conn.execute("""
       CREATE TABLE IF NOT EXISTS plates (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        plate TEXT NOT NULL,
+        plate TEXT,
         timestamp TEXT NOT NULL,
         latitude REAL,
         longitude REAL,
         image_path TEXT,
         vehicle_info TEXT,
         raw_ai_response TEXT,
+        ai_label TEXT DEFAULT 'unknown',
         created_at TEXT DEFAULT (datetime('now'))
       )
     """)
@@ -31,6 +32,10 @@ class Logger:
         updated_at TEXT DEFAULT (datetime('now'))
       )
     """)
+    try:
+      self.conn.execute("ALTER TABLE plates ADD COLUMN ai_label TEXT DEFAULT 'unknown'")
+    except:
+      pass
     self.conn.commit()
 
   def is_duplicate(self, plate, window_seconds=None):
@@ -43,29 +48,32 @@ class Logger:
       )
       return cur.fetchone()[0] > 0
 
-  def log(self, plate, lat=None, lon=None, image_path=None, vehicle_info=None, raw_ai=None):
+  def log(self, plate=None, lat=None, lon=None, image_path=None, vehicle_info=None, raw_ai=None, ai_label="unknown"):
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(time.time() * 1000) % 1000:03d}Z"
     with self.lock:
       cur = self.conn.execute(
-        "INSERT INTO plates (plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response) VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (plate, ts, lat, lon, image_path, vehicle_info, raw_ai)
+        "INSERT INTO plates (plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response, ai_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        (plate, ts, lat, lon, image_path, vehicle_info, raw_ai, ai_label)
       )
       self.conn.commit()
       row_id = cur.lastrowid
     return ts, row_id
 
-  def get_history(self, limit=100, offset=0, search=None):
+  def get_history(self, limit=100, offset=0, search=None, ai_label=None):
     with self.lock:
+      clauses = []
+      params = []
       if search:
-        cur = self.conn.execute(
-          "SELECT * FROM plates WHERE plate LIKE ? ORDER BY id DESC LIMIT ? OFFSET ?",
-          (f"%{search}%", limit, offset)
-        )
-      else:
-        cur = self.conn.execute(
-          "SELECT * FROM plates ORDER BY id DESC LIMIT ? OFFSET ?",
-          (limit, offset)
-        )
+        clauses.append("plate LIKE ?")
+        params.append(f"%{search}%")
+      if ai_label:
+        clauses.append("ai_label = ?")
+        params.append(ai_label)
+      where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+      cur = self.conn.execute(
+        f"SELECT * FROM plates{where} ORDER BY id DESC LIMIT ? OFFSET ?",
+        params + [limit, offset]
+      )
       rows = cur.fetchall()
       cols = [d[0] for d in cur.description]
       return [dict(zip(cols, r)) for r in rows]
@@ -73,7 +81,7 @@ class Logger:
   def get_known_plates(self, limit=50):
     with self.lock:
       cur = self.conn.execute(
-        "SELECT DISTINCT plate FROM plates ORDER BY id DESC LIMIT ?", (limit,)
+        "SELECT DISTINCT plate FROM plates WHERE plate IS NOT NULL AND plate != 'UNKNOWN' ORDER BY id DESC LIMIT ?", (limit,)
       )
       return [r[0] for r in cur.fetchall()]
 
@@ -85,9 +93,18 @@ class Logger:
         "SELECT COUNT(*) FROM plates WHERE date(created_at) = ?", (today,)
       ).fetchone()[0]
       unique = self.conn.execute(
-        "SELECT COUNT(DISTINCT plate) FROM plates"
+        "SELECT COUNT(DISTINCT plate) FROM plates WHERE plate IS NOT NULL"
       ).fetchone()[0]
-      return {"total": total, "today": today_count, "unique": unique}
+      car_count = self.conn.execute(
+        "SELECT COUNT(*) FROM plates WHERE ai_label = 'car'"
+      ).fetchone()[0]
+      non_car_count = self.conn.execute(
+        "SELECT COUNT(*) FROM plates WHERE ai_label = 'non_car'"
+      ).fetchone()[0]
+      error_count = self.conn.execute(
+        "SELECT COUNT(*) FROM plates WHERE ai_label = 'error'"
+      ).fetchone()[0]
+      return {"total": total, "today": today_count, "unique": unique, "cars": car_count, "non_cars": non_car_count, "errors": error_count}
 
   def delete_by_ids(self, ids):
     if not ids:

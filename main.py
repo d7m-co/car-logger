@@ -114,7 +114,8 @@ def create_app(config, detector, logger, location_obj, camera):
     limit = request.args.get("limit", 100, type=int)
     offset = request.args.get("offset", 0, type=int)
     search = request.args.get("search")
-    rows = logger.get_history(limit=limit, offset=offset, search=search)
+    ai_label = request.args.get("ai_label")
+    rows = logger.get_history(limit=limit, offset=offset, search=search, ai_label=ai_label)
     return jsonify(rows)
 
   @app.route("/api/plates")
@@ -186,6 +187,82 @@ def create_app(config, detector, logger, location_obj, camera):
 
   return app, socketio
 
+def log_ai_result(config, logger, location_obj, broadcast_func, ai_result, capture_info):
+  lat, lon = LOCATION_CACHE
+  if location_obj:
+    lat, lon = location_obj.get()
+    LOCATION_CACHE = (lat, lon)
+
+  ms = int(time.time() * 1000) % 1000
+  ts = time.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
+
+  if ai_result is None:
+    ai_label = "error"
+    _, row_id = logger.log(
+      plate=None, lat=lat, lon=lon,
+      image_path=None, vehicle_info="AI error",
+      raw_ai=None, ai_label=ai_label
+    )
+    print(f"  [{time.strftime('%H:%M:%S')}] ⚠️ AI ERROR")
+    if broadcast_func:
+      broadcast_func({
+        "type": "detection",
+        "ai_label": ai_label,
+        "id": row_id,
+        "plate": None,
+        "timestamp": ts,
+        "vehicle_info": "AI error",
+        "image_path": None,
+        "lat": lat, "lon": lon,
+      })
+    return
+
+  is_car = ai_result.get("is_car", False)
+  ai_label = "car" if is_car else "non_car"
+  plate_number = ai_result.get("plate") or ("UNKNOWN" if is_car else None)
+  parts = []
+  if ai_result.get("color"): parts.append(ai_result["color"])
+  if ai_result.get("make"): parts.append(ai_result["make"])
+  vehicle_info = " ".join(parts)
+
+  if is_car and plate_number and plate_number != "UNKNOWN" and logger.is_duplicate(plate_number):
+    print(f"  [{time.strftime('%H:%M:%S')}] ⏭ {plate_number:10s} | DUPLICATE")
+    return
+
+  image_path = None
+  if is_car and config.get("save_snaps"):
+    snaps_dir = config.get("snaps_dir", "data/snaps")
+    os.makedirs(snaps_dir, exist_ok=True)
+    fname = f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-{(plate_number or 'unknown').replace(' ','_')}.jpg"
+    cv2.imwrite(os.path.join(snaps_dir, fname), capture_info["raw_frame"],
+                [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
+    image_path = fname
+
+  _, row_id = logger.log(
+    plate=plate_number, lat=lat, lon=lon,
+    image_path=image_path, vehicle_info=vehicle_info,
+    raw_ai=json.dumps(ai_result), ai_label=ai_label
+  )
+
+  if is_car:
+    label = f"{plate_number:10s}" if plate_number and plate_number != "UNKNOWN" else "UNKNOWN   "
+    print(f"  [{time.strftime('%H:%M:%S')}] 🚗 {label} | {vehicle_info or 'N/A':20s}")
+  else:
+    print(f"  [{time.strftime('%H:%M:%S')}] 🚫 NON-CAR ({ai_result.get('raw', '')[:40]})")
+
+  if broadcast_func:
+    broadcast_func({
+      "type": "detection",
+      "ai_label": ai_label,
+      "id": row_id,
+      "plate": plate_number,
+      "timestamp": ts,
+      "vehicle_info": vehicle_info,
+      "image_path": image_path,
+      "lat": lat, "lon": lon,
+    })
+
+
 def engine_loop(config, camera, detector, plate_reader, logger, location_obj, broadcast_func):
   global RUNNING, LOCATION_CACHE
   camera.start()
@@ -229,63 +306,10 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
       if not plate_reader:
         continue
 
+      capture_info = {"raw_frame": raw}
       crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
       pil_image = Image.fromarray(crop_rgb)
-      ai_result = plate_reader.read_plate(pil_image)
-
-      # AI error (timeout, rate limit, etc.) → skip
-      if ai_result is None:
-        continue
-
-      # AI says it's not a car (person, pet, etc.) → skip
-      if not ai_result.get("is_car"):
-        continue
-
-      if location_obj:
-        lat, lon = location_obj.get()
-        LOCATION_CACHE = (lat, lon)
-
-      ms = int(time.time() * 1000) % 1000
-      ts = time.strftime("%Y-%m-%dT%H:%M:%S.") + f"{ms:03d}Z"
-
-      plate_number = ai_result.get("plate") or "UNKNOWN"
-      parts = []
-      if ai_result.get("color"): parts.append(ai_result["color"])
-      if ai_result.get("make"): parts.append(ai_result["make"])
-      vehicle_info = " ".join(parts)
-
-      if plate_number != "UNKNOWN" and logger.is_duplicate(plate_number):
-        print(f"  [{time.strftime('%H:%M:%S')}] ⏭ {plate_number:10s} | DUPLICATE")
-        continue
-
-      image_path = None
-      if config.get("save_snaps"):
-        snaps_dir = config.get("snaps_dir", "data/snaps")
-        os.makedirs(snaps_dir, exist_ok=True)
-        fname = f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-{plate_number.replace(' ','_')}.jpg"
-        cv2.imwrite(os.path.join(snaps_dir, fname), result["raw_frame"],
-                    [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
-        image_path = fname
-
-      _, row_id = logger.log(
-        plate=plate_number, lat=lat, lon=lon,
-        image_path=image_path, vehicle_info=vehicle_info,
-        raw_ai=json.dumps(ai_result) if ai_result else None
-      )
-
-      label = f"{plate_number:10s}" if plate_number != "UNKNOWN" else "UNKNOWN   "
-      print(f"  [{time.strftime('%H:%M:%S')}] 📸 {label} | {vehicle_info or 'N/A':20s}")
-
-      if broadcast_func:
-        broadcast_func({
-          "type": "detection",
-          "id": row_id,
-          "plate": plate_number,
-          "timestamp": ts,
-          "vehicle_info": vehicle_info,
-          "image_path": image_path,
-          "lat": lat, "lon": lon,
-        })
+      plate_reader.queue_plate(pil_image, callback=lambda ai_result: log_ai_result(config, logger, location_obj, broadcast_func, ai_result, capture_info))
 
   camera.stop()
   logger.close()
@@ -307,6 +331,8 @@ def main():
   logger = Logger(config)
   location_obj = Location(config) if config.get("location_auto") else None
   camera = CameraStream(config)
+  if plate_reader:
+    plate_reader.start()
 
   port = config.get("server_port", 5000)
   print_banner(config, port)

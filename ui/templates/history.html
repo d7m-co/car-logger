@@ -15,10 +15,16 @@
     </div>
   </header>
 
-  <div class="history-page">
+    <div class="history-page">
     <div class="history-header">
       <h1><a href="/" class="back-link">←</a> Detection History</h1>
       <span class="history-count" id="history-count"></span>
+    </div>
+    <div class="filter-bar">
+      <button class="btn filter-btn active" data-filter="">All</button>
+      <button class="btn filter-btn" data-filter="car">🚗 Cars</button>
+      <button class="btn filter-btn" data-filter="non_car">🚫 Non-cars</button>
+      <button class="btn filter-btn" data-filter="error">⚠ Errors</button>
     </div>
     <div class="search-bar">
       <input type="text" id="search-input" placeholder="Search by plate number..." class="input" style="flex:1" list="plate-list" autocomplete="off">
@@ -32,6 +38,7 @@
         <thead>
           <tr>
             <th style="width:36px"><input type="checkbox" id="select-all" aria-label="Select all"></th>
+            <th>Result</th>
             <th>Plate</th>
             <th>Time</th>
             <th>Vehicle</th>
@@ -55,11 +62,19 @@
 var PAGE_SIZE = 100;
 var currentOffset = 0;
 var currentSearch = "";
+var currentFilter = "";
 var loading = false;
 var hasMore = true;
 var allRows = [];
 
 function getEl(id) { return document.getElementById(id); }
+
+function aiLabelHtml(label) {
+  if (label === "car") return '<span class="badge badge-car">🚗 Car</span>';
+  if (label === "non_car") return '<span class="badge badge-non-car">🚫 Not a car</span>';
+  if (label === "error") return '<span class="badge badge-error">⚠ Error</span>';
+  return '<span class="badge badge-unknown">--</span>';
+}
 
 function showSkeleton() {
   var tbody = getEl("history-body");
@@ -68,6 +83,7 @@ function showSkeleton() {
     var tr = document.createElement("tr");
     tr.innerHTML =
       '<td><div class="skeleton" style="width:16px;height:16px;margin:auto"></div></td>' +
+      '<td><div class="skeleton" style="height:16px;width:60px"></div></td>' +
       '<td><div class="skeleton" style="height:16px;width:80px"></div></td>' +
       '<td><div class="skeleton" style="height:16px;width:140px"></div></td>' +
       '<td><div class="skeleton" style="height:16px;width:60px"></div></td>' +
@@ -90,6 +106,7 @@ async function loadHistory(search, append) {
 
   var url = "/api/history?limit=" + PAGE_SIZE + "&offset=" + currentOffset;
   if (search) url += "&search=" + encodeURIComponent(search);
+  if (currentFilter) url += "&ai_label=" + encodeURIComponent(currentFilter);
 
   try {
     var r = await fetch(url);
@@ -100,7 +117,7 @@ async function loadHistory(search, append) {
     if (!append) tbody.innerHTML = "";
 
     if (rows.length === 0 && !append) {
-      tbody.innerHTML = '<tr><td colspan="6" class="empty">No detections yet. Park near a camera to start logging.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">No detections yet. Park near a camera to start logging.</td></tr>';
       getEl("btn-load-more").style.display = "none";
       hasMore = false;
     } else {
@@ -111,7 +128,8 @@ async function loadHistory(search, append) {
         tr.dataset.id = row.id;
         tr.innerHTML =
           '<td><input type="checkbox" class="row-check" data-id="' + row.id + '" aria-label="Select row"></td>' +
-          '<td class="plate-cell">' + row.plate + '</td>' +
+          '<td>' + aiLabelHtml(row.ai_label) + '</td>' +
+          '<td class="plate-cell">' + (row.plate || "--") + '</td>' +
           '<td class="ts-cell">' + (row.timestamp || row.created_at || "").split(".")[0].replace("T", " ") + '</td>' +
           '<td>' + (row.vehicle_info || "--") + '</td>' +
           '<td>' + (row.latitude ? row.latitude.toFixed(4) + ", " + row.longitude.toFixed(4) : "--") + '</td>' +
@@ -123,7 +141,7 @@ async function loadHistory(search, append) {
       getEl("btn-load-more").style.display = hasMore ? "inline-block" : "none";
     }
   } catch(e) {
-    getEl("history-body").innerHTML = '<tr><td colspan="6" class="empty">Could not load history. The server may be restarting — try refreshing in a moment.</td></tr>';
+    getEl("history-body").innerHTML = '<tr><td colspan="7" class="empty">Could not load history. The server may be restarting — try refreshing in a moment.</td></tr>';
   }
 
   try {
@@ -137,6 +155,17 @@ async function loadHistory(search, append) {
   getEl("history-loading").style.display = "none";
   loading = false;
 }
+
+// Filter buttons
+var filterBtns = document.querySelectorAll(".filter-btn");
+filterBtns.forEach(function(btn) {
+  btn.addEventListener("click", function() {
+    filterBtns.forEach(function(b) { b.classList.remove("active"); });
+    this.classList.add("active");
+    currentFilter = this.dataset.filter;
+    loadHistory(getEl("search-input").value, false);
+  });
+});
 
 getEl("btn-search").addEventListener("click", function() {
   currentSearch = getEl("search-input").value;
@@ -157,7 +186,7 @@ getEl("btn-load-more").addEventListener("click", function() {
 
 getEl("btn-export").addEventListener("click", function() {
   if (allRows.length === 0) return;
-  var headers = ["id","plate","timestamp","vehicle_info","latitude","longitude","image_path"];
+  var headers = ["id","ai_label","plate","timestamp","vehicle_info","latitude","longitude","image_path"];
   var csv = headers.join(",") + "\n";
   for (var r of allRows) {
     csv += headers.map(function(h) {

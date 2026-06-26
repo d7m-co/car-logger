@@ -1,4 +1,4 @@
-import base64, json, time
+import base64, json, time, threading, queue
 from io import BytesIO
 from PIL import Image
 import requests
@@ -10,6 +10,40 @@ class PlateReader:
     self.model = config.get("openrouter_model", "meta-llama/llama-3.2-11b-vision-instruct:free")
     self._last_call = 0
     self._min_interval = 2.0
+    self._queue = queue.Queue(maxsize=20)
+    self._worker = None
+    self._running = False
+
+  def start(self):
+    self._running = True
+    self._worker = threading.Thread(target=self._worker_loop, daemon=True)
+    self._worker.start()
+
+  def stop(self):
+    self._running = False
+
+  def _worker_loop(self):
+    while self._running:
+      try:
+        item = self._queue.get(timeout=1)
+        pil_image, callback = item
+        result = self._do_read_plate(pil_image)
+        if callback:
+          callback(result)
+      except queue.Empty:
+        continue
+
+  def queue_plate(self, pil_image, callback=None):
+    if not self.api_key:
+      return
+    now = time.time()
+    if now - self._last_call < self._min_interval:
+      return
+    self._last_call = now
+    try:
+      self._queue.put_nowait((pil_image, callback))
+    except queue.Full:
+      pass
 
   def _encode_image(self, pil_image, max_size=640):
     w, h = pil_image.size
@@ -20,11 +54,7 @@ class PlateReader:
     pil_image.save(buf, format="JPEG", quality=85)
     return base64.b64encode(buf.getvalue()).decode()
 
-  def read_plate(self, pil_image):
-    elapsed = time.time() - self._last_call
-    if elapsed < self._min_interval:
-      return None
-
+  def _do_read_plate(self, pil_image):
     if not self.api_key:
       return None
 
@@ -43,9 +73,6 @@ class PlateReader:
       "response_format": {"type": "json_object"},
       "max_tokens": 200
     }
-
-    now = time.time()
-    self._last_call = now
 
     try:
       r = requests.post(

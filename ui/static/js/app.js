@@ -155,23 +155,31 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   }
 
+  function aiLabelHtml(label) {
+    if (label === "car") return '<span class="badge badge-car">🚗 Car</span>';
+    if (label === "non_car") return '<span class="badge badge-non-car">🚫 Not a car</span>';
+    if (label === "error") return '<span class="badge badge-error">⚠ AI error</span>';
+    return '<span class="badge badge-unknown">--</span>';
+  }
+
   function addDetection(data) {
     detectionCount++;
     totalCount.textContent = detectionCount;
 
     var item = document.createElement("div");
     item.className = "detection-item";
-    item.dataset.plate = data.plate || "UNKNOWN";
+    item.dataset.plate = data.plate || "";
     item.dataset.time = data.timestamp || "";
     item.dataset.vehicle = data.vehicle_info || "";
     item.dataset.image = data.image_path || "";
     item.dataset.lat = data.lat || 0;
     item.dataset.lon = data.lon || 0;
     item.dataset.id = data.id || "";
+    item.dataset.aiLabel = data.ai_label || "";
     item.innerHTML =
-      '<div class="plate">' + (data.plate || "UNKNOWN") + '</div>' +
+      '<div class="plate">' + (data.plate || aiLabelHtml(data.ai_label)) + '</div>' +
       '<div class="info">' +
-        '<div class="vehicle">' + (data.vehicle_info || "") + '</div>' +
+        '<div class="vehicle">' + (data.vehicle_info || aiLabelHtml(data.ai_label)) + '</div>' +
         '<div class="time">' + ((data.timestamp || "").split(".")[0].replace("T", " ") || "") + '</div>' +
       '</div>';
 

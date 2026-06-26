@@ -6,3 +6,4 @@ data/plates.db
 data/snaps/
 venv/
 .venv/
+node_modules/
