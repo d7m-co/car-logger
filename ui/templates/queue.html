@@ -44,6 +44,7 @@
       <s>🔄 processing: <em id="qs-processing">0</em></s>
       <s>✅ completed: <em id="qs-done">0</em></s>
       <s>❌ errors: <em id="qs-errs">0</em></s>
+      <s>⚡ speed: <em id="qs-speed">--</em></s>
     </div>
     <div class="term" id="term"></div>
   </main>
@@ -51,6 +52,7 @@
 <script>
 var term = document.getElementById("term");
 function id_(s) { return document.getElementById(s); }
+var lastDone = 0, lastTime = Date.now();
 
 function pad2(n) { return (n<10?"0":"")+n; }
 function fmtTime(t) {
@@ -112,6 +114,16 @@ function render(reqs) {
   if (q>0) {
     id_("h-indicator-queue").innerHTML = '<span aria-hidden="true">📨</span> <span>'+q+' queued</span>';
   }
+  // thrust speed
+  var now = Date.now();
+  var doneDelta = d + e - lastDone;
+  var timeDelta = (now - lastTime) / 1000;
+  if (doneDelta > 0 && timeDelta > 0) {
+    var perMin = Math.round(doneDelta / timeDelta * 60);
+    id_("qs-speed").textContent = perMin + "/min";
+  }
+  lastDone = d + e;
+  lastTime = now;
 }
 
 function poll() {

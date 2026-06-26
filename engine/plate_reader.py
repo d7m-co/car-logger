@@ -8,10 +8,10 @@ class PlateReader:
     self.config = config
     self.api_key = config.get("openrouter_api_key", "")
     self.model = config.get("openrouter_model", "openrouter/free")
-    self._req_queue = queue.Queue(maxsize=20)
+    self._req_queue = queue.Queue(maxsize=500)
     self._last_api_call = 0
-    self._min_api_interval = 10.0
-    self._req_queue = queue.Queue(maxsize=20)
+    self._base_api_interval = 10.0
+    self._cooldown_until = 0.0
     self._worker = None
     self._running = False
     self._lock = threading.Lock()
@@ -51,15 +51,27 @@ class PlateReader:
       except:
         pass
 
+  def _dynamic_interval(self):
+    '''thrust: faster when queue is deep, coast when shallow'''
+    q = self._req_queue.qsize()
+    base = self._base_api_interval
+    if q >= 30: return max(base - 2, 5.0)
+    if q >= 15: return max(base - 1, 6.0)
+    if q >= 5:  return base
+    return base
+
   def _worker_loop(self):
     while self._running:
       try:
         item = self._req_queue.get(timeout=1)
         req_id, pil_image, callback = item
         now = time.time()
+        cooldown_left = self._cooldown_until - now
+        interval = self._dynamic_interval()
         since_last = now - self._last_api_call
-        if since_last < self._min_api_interval:
-          time.sleep(self._min_api_interval - since_last)
+        wait = max(interval - since_last, cooldown_left, 0)
+        if wait > 0:
+          time.sleep(wait)
         self._current_id = req_id
         with self._lock:
           if req_id in self._requests:
@@ -69,7 +81,7 @@ class PlateReader:
         result, err = self._do_read_plate(pil_image)
         self._last_api_call = time.time()
         if err and ("rate" in err.lower() or "429" in err):
-          self._last_api_call += 30  # extra cooldown after rate limit
+          self._cooldown_until = time.time() + 15
         self._current_id = None
         with self._lock:
           if req_id in self._requests:
@@ -151,12 +163,11 @@ class PlateReader:
       "X-Title": "Car Security Logger"
     }
 
-    max_retries = 2
-    for attempt in range(max_retries + 1):
+    for attempt in range(2):
       try:
         r = requests.post(
           "https://openrouter.ai/api/v1/chat/completions",
-          headers=headers, json=payload, timeout=60
+          headers=headers, json=payload, timeout=15
         )
         if r.status_code == 200:
           data = r.json()
@@ -170,31 +181,27 @@ class PlateReader:
             "confidence": parsed.get("confidence", "none"),
             "raw": content
           }, None
-        elif r.status_code == 429 and attempt < max_retries:
-          backoff = 5 * (attempt + 1)
-          time.sleep(backoff)
-          continue
-        elif r.status_code == 404 and attempt < max_retries:
-          time.sleep(3)
+        elif r.status_code == 404 and attempt == 0:
+          time.sleep(2)
           continue
         else:
           err_msg = f"HTTP {r.status_code}"
           if r.status_code == 429:
-            err_msg = "Rate limited (upstream busy)"
+            err_msg = "Rate limited"
           elif r.status_code >= 500:
             err_msg = "Server error"
           try:
             body = r.json()
             m = body.get("error", {}).get("message", "")
             if m:
-              err_msg += f": {m[:120]}"
+              err_msg += f": {m[:100]}"
           except:
             pass
           return None, err_msg
       except requests.Timeout:
-        return None, "Request timed out"
+        return None, "Timed out"
       except requests.ConnectionError:
         return None, "Connection error"
       except Exception as e:
-        return None, f"Unexpected error: {e}"
-    return None, "Rate limited after retries"
+        return None, f"Error: {e}"
+    return None, "Failed"
