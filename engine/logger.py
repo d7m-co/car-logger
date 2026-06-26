@@ -7,44 +7,39 @@ class Logger:
     db_path = config.get("db_path", "data/plates.db")
     os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
     self.conn = sqlite3.connect(db_path, check_same_thread=False)
+    self.conn.execute("PRAGMA journal_mode=WAL")
+    self.conn.execute("PRAGMA synchronous=NORMAL")
     self.lock = threading.Lock()
     self._create_tables()
 
   def _create_tables(self):
-    self.conn.execute("""
-      CREATE TABLE IF NOT EXISTS plates (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        plate TEXT,
-        timestamp TEXT NOT NULL,
-        latitude REAL,
-        longitude REAL,
-        image_path TEXT,
-        vehicle_info TEXT,
-        raw_ai_response TEXT,
-        ai_label TEXT DEFAULT 'unknown',
-        created_at TEXT DEFAULT (datetime('now'))
-      )
-    """)
-    self.conn.execute("""
-      CREATE TABLE IF NOT EXISTS config_log (
-        key TEXT PRIMARY KEY,
-        value TEXT,
-        updated_at TEXT DEFAULT (datetime('now'))
-      )
-    """)
-    try:
-      self.conn.execute("ALTER TABLE plates ADD COLUMN ai_label TEXT DEFAULT 'unknown'")
-    except:
-      pass
-    try:
-      self.conn.execute("ALTER TABLE plates RENAME TO plates_old")
-      self.conn.execute("CREATE TABLE plates (id INTEGER PRIMARY KEY AUTOINCREMENT, plate TEXT, timestamp TEXT NOT NULL, latitude REAL, longitude REAL, image_path TEXT, vehicle_info TEXT, raw_ai_response TEXT, ai_label TEXT DEFAULT 'unknown', created_at TEXT DEFAULT (datetime('now')))")
-      self.conn.execute("INSERT INTO plates (id, plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response, ai_label, created_at) SELECT id, plate, timestamp, latitude, longitude, image_path, vehicle_info, raw_ai_response, COALESCE(ai_label, 'unknown'), created_at FROM plates_old")
-      self.conn.execute("DROP TABLE plates_old")
+    with self.lock:
+      self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS plates (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plate TEXT,
+          timestamp TEXT NOT NULL,
+          latitude REAL,
+          longitude REAL,
+          image_path TEXT,
+          vehicle_info TEXT,
+          raw_ai_response TEXT,
+          ai_label TEXT DEFAULT 'unknown',
+          created_at TEXT DEFAULT (datetime('now'))
+        )
+      """)
+      self.conn.execute("""
+        CREATE TABLE IF NOT EXISTS config_log (
+          key TEXT PRIMARY KEY,
+          value TEXT,
+          updated_at TEXT DEFAULT (datetime('now'))
+        )
+      """)
+      # Add ai_label column if it doesn't exist (older DB compat)
+      cols = [r[1] for r in self.conn.execute("PRAGMA table_info(plates)").fetchall()]
+      if 'ai_label' not in cols:
+        self.conn.execute("ALTER TABLE plates ADD COLUMN ai_label TEXT DEFAULT 'unknown'")
       self.conn.commit()
-    except:
-      self.conn.rollback()
-    self.conn.commit()
 
   def is_duplicate(self, plate, window_seconds=None):
     if window_seconds is None:

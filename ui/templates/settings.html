@@ -18,40 +18,35 @@
     </div>
   </header>
 
-  <div class="settings-page">
+  <main class="settings-page">
     <h1><a href="/" class="back-link">←</a> Settings</h1>
 
     <section class="settings-group">
-      <h3>OpenRouter AI</h3>
-      <label>API Key</label>
-      <input type="password" id="api-key" placeholder="sk-or-v1-..." class="input" disabled>
-      <span class="help-text">Get a free key at <a href="https://openrouter.ai/keys" target="_blank" class="help-link">openrouter.ai/keys</a>. Required for license plate reading.</span>
+      <h3>AI Vision</h3>
+      <label for="go-api-key">OpenCode Go API Key</label>
+      <input type="password" id="go-api-key" placeholder="sk-..." class="input" disabled>
+      <span class="help-text">Primary: fast, reliable mimo-v2.5 model. Get a key at <a href="https://opencode.ai/auth" target="_blank" class="help-link">opencode.ai/auth</a>.</span>
 
-      <label>Model</label>
-      <select id="model" class="input" disabled>
-        <option value="meta-llama/llama-3.2-11b-vision-instruct:free">Llama 3.2 Vision (free)</option>
-        <option value="openai/gpt-4o-mini">GPT-4o Mini (paid)</option>
-        <option value="openai/gpt-4o">GPT-4o (paid)</option>
-        <option value="qwen/qwen-vl-plus:free">Qwen VL Plus (free)</option>
-      </select>
-      <span class="help-text">The AI model that reads license plates from crop images.</span>
+      <label for="or-api-key">OpenRouter API Key</label>
+      <input type="password" id="or-api-key" placeholder="sk-or-v1-..." class="input" disabled>
+      <span class="help-text">Fallback: free Gemma/Nemotron models when Go is unavailable. Get a key at <a href="https://openrouter.ai/keys" target="_blank" class="help-link">openrouter.ai/keys</a>.</span>
     </section>
 
     <section class="settings-group">
       <h3>Detection</h3>
-      <label>Sensitivity <span class="help-inline" id="sens-label">50</span></label>
+      <label for="sensitivity">Sensitivity <span class="help-inline" id="sens-label">50</span></label>
       <input type="range" id="sensitivity" min="10" max="100" value="50" class="slider" disabled>
       <span class="help-text">Higher values detect smaller movements. Adjust if you get too many or too few triggers.</span>
 
-      <label>Min Car Size (pixels)</label>
+      <label for="min-car-area">Min Car Size (pixels)</label>
       <input type="number" id="min-car-area" class="input input-sm" min="100" max="10000" placeholder="500" disabled>
       <span class="help-text">Smallest car area to detect. Lower = more sensitive to distant cars.</span>
 
-      <label>Duplicate Window (seconds)</label>
+      <label for="dedup-seconds">Duplicate Window (seconds)</label>
       <input type="number" id="dedup-seconds" class="input input-sm" min="10" max="3600" placeholder="60" disabled>
       <span class="help-text">Ignore repeat sightings of the same plate within this window. Prevents duplicates.</span>
 
-      <label>Resolution</label>
+      <label for="resolution">Resolution</label>
       <select id="resolution" class="input" disabled>
         <option value="640,480">640x480 (Low, battery savings)</option>
         <option value="720,480" selected>720x480 (Default)</option>
@@ -61,11 +56,11 @@
 
     <section class="settings-group">
       <h3>Location</h3>
-      <label><input type="checkbox" id="location-auto" checked disabled> Auto locate (WiFi)</label>
+      <label for="location-auto"><input type="checkbox" id="location-auto" checked disabled> Auto locate (WiFi)</label>
       <div id="manual-loc" style="display:none">
-        <label>Latitude</label>
+        <label for="loc-lat">Latitude</label>
         <input type="number" step="any" id="loc-lat" class="input input-md" min="-90" max="90" placeholder="0.0" disabled>
-        <label>Longitude</label>
+        <label for="loc-lon">Longitude</label>
         <input type="number" step="any" id="loc-lon" class="input input-md" min="-180" max="180" placeholder="0.0" disabled>
       </div>
       <span class="help-text">Auto uses WiFi geolocation. Manual lets you set a fixed position.</span>
@@ -73,7 +68,7 @@
 
     <section class="settings-group">
       <h3>Server</h3>
-      <label>Port</label>
+      <label for="server-port">Port</label>
       <input type="number" id="server-port" class="input input-sm" min="1024" max="65535" placeholder="5000" disabled>
       <span class="help-text">The dashboard port. Must be between 1024 and 65535. Restart required to change.</span>
     </section>
@@ -81,131 +76,13 @@
     <div class="settings-actions">
       <button class="btn primary" id="btn-save" disabled>Save</button>
       <a href="/" class="btn">Cancel</a>
-      <span id="save-msg" class="save-msg"></span>
+      <span id="save-msg" class="save-msg" role="alert"></span>
     </div>
-  </div>
+  </main>
 </div>
 
-<script>
-function getEl(id) { return document.getElementById(id); }
-
-var _configLoaded = false;
-
-async function loadConfig() {
-  try {
-    const r = await fetch("/api/config");
-    if (!r.ok) throw new Error("HTTP " + r.status);
-    const cfg = await r.json();
-    getEl("api-key").value = cfg.openrouter_api_key || "";
-    getEl("model").value = cfg.openrouter_model;
-    getEl("sensitivity").value = cfg.sensitivity;
-    getEl("sens-label").textContent = cfg.sensitivity;
-    getEl("min-car-area").value = cfg.min_car_area;
-    getEl("dedup-seconds").value = cfg.dedup_seconds;
-    getEl("resolution").value = cfg.resolution.join(",");
-    getEl("location-auto").checked = cfg.location_auto;
-    getEl("loc-lat").value = cfg.location_lat;
-    getEl("loc-lon").value = cfg.location_lon;
-    getEl("server-port").value = cfg.server_port;
-    toggleManualLoc();
-    _configLoaded = true;
-    document.querySelectorAll(".settings-page [disabled]").forEach(function(el) { el.disabled = false; });
-    getEl("btn-save").disabled = false;
-  } catch(e) {
-    showMsg("Failed to load settings: " + e.message, "error");
-  }
-}
-
-function toggleManualLoc() {
-  getEl("manual-loc").style.display =
-    getEl("location-auto").checked ? "none" : "block";
-}
-
-getEl("location-auto").addEventListener("change", toggleManualLoc);
-
-getEl("sensitivity").addEventListener("input", function() {
-  getEl("sens-label").textContent = this.value;
-});
-
-function readVal(id, fallback) {
-  var v = parseFloat(getEl(id).value);
-  return isNaN(v) ? fallback : v;
-}
-
-var saving = false;
-
-getEl("btn-save").addEventListener("click", async function() {
-  if (saving) return;
-  saving = true;
-  var btn = getEl("btn-save");
-  btn.textContent = "Saving...";
-  btn.disabled = true;
-
-  var body = {
-    openrouter_api_key: getEl("api-key").value,
-    openrouter_model: getEl("model").value,
-    sensitivity: parseInt(getEl("sensitivity").value),
-    min_car_area: readVal("min-car-area", 500),
-    dedup_seconds: readVal("dedup-seconds", 60),
-    resolution: getEl("resolution").value.split(",").map(Number),
-    location_auto: getEl("location-auto").checked,
-    location_lat: readVal("loc-lat", 0),
-    location_lon: readVal("loc-lon", 0),
-    server_port: readVal("server-port", 5000),
-  };
-
-  try {
-    var r = await fetch("/api/config", {
-      method: "POST",
-      headers: {"Content-Type": "application/json"},
-      body: JSON.stringify(body)
-    });
-    if (r.ok) {
-      showMsg("Saved successfully", "ok");
-    } else {
-      var emsg = "Save failed";
-      try { var ej = await r.json(); if (ej.message) emsg = ej.message; } catch(e) {}
-      showMsg(emsg, "error");
-    }
-  } catch(e) {
-    showMsg("Save failed: " + e.message, "error");
-  }
-
-  saving = false;
-  btn.textContent = "Save";
-  btn.disabled = false;
-});
-
-function showMsg(text, type) {
-  var msg = getEl("save-msg");
-  msg.textContent = text;
-  msg.className = "save-msg " + (type === "ok" ? "ok" : "err");
-  setTimeout(function() { msg.textContent = ""; msg.className = "save-msg"; }, 5000);
-}
-
-loadConfig();
-
-(function pollSettingsStatus() {
-  fetch("/api/status").then(function(r) { return r.json(); }).then(function(s) {
-    var q = s.ai_queue || 0;
-    var el = document.getElementById("h-indicator-queue");
-    var aiEl = document.getElementById("h-indicator-ai");
-    if (q > 0 && el) {
-      el.style.display = "inline-flex";
-      el.innerHTML = '<span aria-hidden="true">📨</span> <span>' + q + " queued</span>";
-      el.className = "indicator active";
-    } else if (el) {
-      el.style.display = "none";
-    }
-    if (aiEl) {
-      var ok = s.api_key;
-      var modelName = (s.model || "").split("/").pop() || "ready";
-      aiEl.innerHTML = "🤖 <span>" + (ok ? "AI: " + modelName : "AI key missing") + "</span>";
-      aiEl.className = "indicator" + (ok ? " active" : " error");
-    }
-  }).catch(function() {});
-  setTimeout(pollSettingsStatus, 5000);
-})();
-</script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/status-poll.js"></script>
+<script src="/static/js/pages/settings.js"></script>
 </body>
 </html>

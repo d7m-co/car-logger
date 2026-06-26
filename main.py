@@ -40,8 +40,7 @@ def print_banner(config, port):
   print("  ║     🚗 Car Security Logger               ║")
   print("  ║───────────────────────────────────────────║")
   if config.api_key_set:
-    m = config.get("openrouter_model", "").split("/")[-1]
-    print(f"  ║  🤖 AI: {m:<28} ║")
+    print(f"  ║  🤖 AI: Go(mimo) + OR(gemma/nemotron) ║")
   else:
     print(f"  ║  🤖 AI: Key not set                     ║")
   print(f"  ║───────────────────────────────────────────║")
@@ -51,17 +50,37 @@ def print_banner(config, port):
   print("  ╚═══════════════════════════════════════════╝")
   print("")
 
+def _check_origin(request, config):
+  from flask import jsonify
+  if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+    return None
+  port = config.get("server_port", 5000)
+  allowed = {f"http://localhost:{port}", f"http://127.0.0.1:{port}"}
+  allowed.update(config.get("allowed_origins", []))
+  origin = request.headers.get("Origin", "") or ""
+  if not origin or origin not in allowed:
+    return jsonify({"status": "error", "message": "Invalid origin"}), 403
+  return None
+
+def _safe_snaps_path(filename, config):
+  base = os.path.abspath(config.get("snaps_dir", "data/snaps"))
+  target = os.path.abspath(os.path.join(base, filename))
+  if target == base or target.startswith(base + os.sep):
+    return target
+  return None
+
 def create_app(config, detector, logger, location_obj, camera, plate_reader):
-  from flask import Flask, send_from_directory, request, jsonify, Response
+  from flask import Flask, send_from_directory, request, jsonify, Response, abort
   from flask_socketio import SocketIO
 
+  port = config.get("server_port", 5000)
   app = Flask(__name__, template_folder="ui/templates", static_folder="ui/static")
   app.config["SECRET_KEY"] = os.urandom(16).hex()
-  socketio = SocketIO(app, cors_allowed_origins="http://localhost:5000", async_mode="threading")
+  socketio = SocketIO(app, cors_allowed_origins=[f"http://localhost:{port}", f"http://127.0.0.1:{port}"], async_mode="threading")
 
   @app.after_request
   def add_security_headers(resp):
-    resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://cdn.socket.io; connect-src 'self' ws: http://localhost:5000;"
+    resp.headers["Content-Security-Policy"] = f"default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.socket.io; connect-src 'self' ws://localhost:{port} wss://localhost:{port} http://localhost:{port} https://localhost:{port};"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
@@ -93,8 +112,10 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
 
   @app.route("/snaps/<path:filename>")
   def serve_snap(filename):
-    sanitized = os.path.basename(filename)
-    return send_from_directory(config.get("snaps_dir", "data/snaps"), sanitized)
+    target = _safe_snaps_path(filename, config)
+    if target is None:
+      abort(404)
+    return send_from_directory(config.get("snaps_dir", "data/snaps"), os.path.relpath(target, os.path.abspath(config.get("snaps_dir", "data/snaps"))))
 
   @app.route("/video_feed")
   def video_feed():
@@ -118,26 +139,53 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
 
   @app.route("/api/config", methods=["GET"])
   def get_config():
-    safe = {k: v for k, v in config.data.items() if k != "openrouter_api_key"}
-    safe["openrouter_api_key"] = bool(config.get("openrouter_api_key"))
+    safe = {k: v for k, v in config.data.items() if k not in ("openrouter_api_key", "opencode_go_api_key")}
+    safe["openrouter_api_key"] = config.or_key_set
+    safe["opencode_go_api_key"] = config.go_key_set
     return jsonify(safe)
 
-  CONFIG_ALLOWED_KEYS = {"openrouter_api_key", "openrouter_model", "camera_id", "resolution", "fps_motion", "fps_idle", "idle_timeout", "sensitivity", "min_car_area", "dedup_seconds", "location_auto", "location_lat", "location_lon", "location_refresh_minutes", "server_port", "save_snaps", "snap_quality", "snaps_dir", "auto_start", "detection_zone"}
+  CONFIG_ALLOWED_KEYS = {"openrouter_api_key", "opencode_go_api_key", "camera_id", "resolution", "fps_motion", "fps_idle", "idle_timeout", "sensitivity", "min_car_area", "dedup_seconds", "location_auto", "location_lat", "location_lon", "location_refresh_minutes", "server_port", "save_snaps", "snap_quality", "snaps_dir", "auto_start", "detection_zone"}
 
   @app.route("/api/config", methods=["POST"])
   def set_config():
-    origin = request.headers.get("Origin", "")
-    if origin and origin not in ("http://localhost:5000", f"http://127.0.0.1:{config.get('server_port', 5000)}"):
-      return jsonify({"status": "error", "message": "Invalid origin"}), 403
+    origin_check = _check_origin(request, config)
+    if origin_check:
+      return origin_check
     data = request.get_json()
     if not data:
       return jsonify({"status": "error", "message": "No settings data received. Try again."}), 400
     filtered = {k: v for k, v in data.items() if k in CONFIG_ALLOWED_KEYS}
     if not filtered:
       return jsonify({"status": "error", "message": "No valid settings keys."}), 400
+
+    # Basic type validation / coercion
+    type_map = {
+      "server_port": int,
+      "camera_id": int,
+      "fps_motion": int,
+      "fps_idle": int,
+      "idle_timeout": int,
+      "sensitivity": int,
+      "min_car_area": int,
+      "dedup_seconds": int,
+      "location_refresh_minutes": int,
+      "snap_quality": int,
+      "location_lat": float,
+      "location_lon": float,
+    }
+    for k, caster in type_map.items():
+      if k in filtered:
+        try:
+          filtered[k] = caster(filtered[k])
+        except (ValueError, TypeError):
+          return jsonify({"status": "error", "message": f"Invalid value for {k}"}), 400
+
     config.set_many(filtered)
-    if "openrouter_api_key" in filtered and plate_reader:
-      plate_reader.api_key = filtered["openrouter_api_key"]
+    if plate_reader:
+      if "openrouter_api_key" in filtered:
+        plate_reader.set_keys(or_key=filtered["openrouter_api_key"])
+      if "opencode_go_api_key" in filtered:
+        plate_reader.set_keys(go_key=filtered["opencode_go_api_key"])
     return jsonify({"status": "ok"})
 
   @app.route("/api/history")
@@ -159,6 +207,9 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
 
   @app.route("/api/history", methods=["DELETE"])
   def delete_history():
+    origin_check = _check_origin(request, config)
+    if origin_check:
+      return origin_check
     if request.args.get("all"):
       count = logger.delete_all()
       return jsonify({"deleted": count})
@@ -173,8 +224,12 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
     global LOCATION_CACHE
     return jsonify({
       "camera": camera.is_opened,
-      "api_key": bool(config.get("openrouter_api_key")),
-      "model": config.get("openrouter_model"),
+      "openrouter_api_key": config.or_key_set,
+      "opencode_go_api_key": config.go_key_set,
+      "api_key": config.api_key_set,
+      "model": "auto-rotate",
+        "models": plate_reader.models if plate_reader else [],
+      "model_idx": plate_reader._model_idx if plate_reader else 0,
       "location": {"lat": LOCATION_CACHE[0], "lon": LOCATION_CACHE[1]},
       "stats": logger.get_stats(),
       "ai_queue": plate_reader.queue_size if plate_reader else 0,
@@ -203,8 +258,12 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
       "uptime": uptime_seconds,
       "camera": {"connected": camera.is_opened},
       "api": {
-        "key_set": bool(config.get("openrouter_api_key")),
-        "model": config.get("openrouter_model"),
+        "key_set": config.api_key_set,
+        "openrouter_api_key": config.or_key_set,
+        "opencode_go_api_key": config.go_key_set,
+        "model": "auto-rotate",
+      "models": plate_reader.models if plate_reader else [],
+        "model_idx": plate_reader._model_idx if plate_reader else 0,
       },
       "database": {"size_bytes": db_size, "rows": row_count},
       "disk": {"free_bytes": disk.free, "total_bytes": disk.total, "percent_used": disk.percent},
@@ -275,9 +334,11 @@ def log_ai_result(config, logger, location_obj, broadcast_func, ai_result, captu
     snaps_dir = config.get("snaps_dir", "data/snaps")
     os.makedirs(snaps_dir, exist_ok=True)
     fname = f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-{(plate_number or 'unknown').replace(' ','_')}.jpg"
-    cv2.imwrite(os.path.join(snaps_dir, fname), capture_info["raw_frame"],
-                [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
-    image_path = fname
+    safe_path = _safe_snaps_path(fname, config)
+    if safe_path is not None:
+      cv2.imwrite(safe_path, capture_info["raw_frame"],
+                  [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
+      image_path = fname
 
   _, row_id = logger.log(
     plate=plate_number, lat=lat, lon=lon,
@@ -353,12 +414,16 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
         snaps_dir = config.get("snaps_dir", "data/snaps")
         os.makedirs(snaps_dir, exist_ok=True)
         fname = f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-capture.jpg"
-        cv2.imwrite(os.path.join(snaps_dir, fname), raw,
-                    [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
+        safe_path = _safe_snaps_path(fname, config)
+        if safe_path is not None:
+          cv2.imwrite(safe_path, raw,
+                      [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
+        else:
+          fname = None
       else:
         fname = None
 
-      if not plate_reader or not plate_reader.api_key:
+      if not plate_reader or not plate_reader.has_any_key:
         continue
 
       capture_info = {"raw_frame": raw.copy(), "snap_filename": fname}
@@ -377,8 +442,8 @@ def main():
   config = Config()
 
   if not config.api_key_set:
-    print("  ⚠ No OpenRouter API key configured.")
-    print("  ⚠ Open the dashboard → Settings → paste your key.")
+    print("  ⚠ No AI API key configured.")
+    print("  ⚠ Open the dashboard → Settings → paste your OpenRouter or OpenCode Go key.")
     print("")
 
   detector = Detector(config)
@@ -386,13 +451,14 @@ def main():
   logger = Logger(config)
   location_obj = Location(config) if config.get("location_auto") else None
   camera = CameraStream(config)
-  if plate_reader.api_key:
+  if plate_reader.has_any_key:
     plate_reader.start()
 
   port = config.get("server_port", 5000)
   print_banner(config, port)
 
   app, socketio = create_app(config, detector, logger, location_obj, camera, plate_reader)
+  Config.secure_config_file()
 
   detection_history = []
 

@@ -96,7 +96,7 @@ document.addEventListener("DOMContentLoaded", function() {
   // Video feed error handling
   var feedError = document.createElement("div");
   feedError.className = "feed-error";
-  feedError.innerHTML = 'Camera feed unavailable. Check the camera connection and try again.&nbsp; <button class="btn btn-tiny" onclick="retryFeed()">Retry</button>';
+  feedError.innerHTML = 'Camera feed unavailable. Check the camera connection and try again.&nbsp; <button class="btn btn-tiny">Retry</button>';
   feedError.style.display = "none";
 
   feedImg.addEventListener("error", function() {
@@ -162,14 +162,6 @@ document.addEventListener("DOMContentLoaded", function() {
     }
   }
 
-  function aiLabelHtml(label) {
-    if (label === "car") return '<span class="badge badge-car">🚗 Car</span>';
-    if (label === "non_car") return '<span class="badge badge-non-car">🚫 Not a car</span>';
-    if (label === "error") return '<span class="badge badge-error">⚠ AI error</span>';
-    return '<span class="badge badge-unknown">--</span>';
-  }
-
-  function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
   function addDetection(data) {
     detectionCount++;
@@ -177,6 +169,9 @@ document.addEventListener("DOMContentLoaded", function() {
 
     var item = document.createElement("div");
     item.className = "detection-item";
+    item.setAttribute("role", "button");
+    item.setAttribute("tabindex", "0");
+    item.setAttribute("aria-label", "View detection " + (data.plate || data.ai_label || ""));
     item.dataset.plate = data.plate || "";
     item.dataset.time = data.timestamp || "";
     item.dataset.vehicle = data.vehicle_info || "";
@@ -190,9 +185,9 @@ document.addEventListener("DOMContentLoaded", function() {
     item.dataset.make = data.make || "";
     item.dataset.rawAi = data.raw_ai || "";
 
-    var plateHtml = data.plate ? escHtml(data.plate) : aiLabelHtml(data.ai_label);
-    var vehicleHtml = data.vehicle_info ? escHtml(data.vehicle_info) : aiLabelHtml(data.ai_label);
-    var timeHtml = escHtml((data.timestamp || "").split(".")[0].replace("T", " "));
+    var plateHtml = data.plate ? CarLogger.escHtml(data.plate) : CarLogger.aiLabelHtml(data.ai_label);
+    var vehicleHtml = data.vehicle_info ? CarLogger.escHtml(data.vehicle_info) : CarLogger.aiLabelHtml(data.ai_label);
+    var timeHtml = CarLogger.escHtml(CarLogger.formatDateTime(data.timestamp));
     item.innerHTML =
       '<div class="plate">' + plateHtml + '</div>' +
       '<div class="info">' +
@@ -202,6 +197,12 @@ document.addEventListener("DOMContentLoaded", function() {
 
     item.addEventListener("click", function() {
       openModal(this.dataset);
+    });
+    item.addEventListener("keydown", function(e) {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        openModal(this.dataset);
+      }
     });
 
     list.insertBefore(item, list.firstChild);
@@ -287,9 +288,9 @@ document.addEventListener("DOMContentLoaded", function() {
         indCamera.className = "indicator error";
       }
 
-      var modelName = (s.model || "").split("/").pop() || "ready";
+      var curModel = (s.models && s.models[s.model_idx] || "").split("/").pop() || "";
       if (s.api_key) {
-        indAI.innerHTML = "🤖 <span>AI: " + modelName + "</span>";
+        indAI.innerHTML = "🤖 <span>AI: " + (curModel || "ready") + "</span>";
         indAI.className = "indicator active";
       } else {
         indAI.innerHTML = "🤖 <span>AI key missing</span>";

@@ -21,6 +21,8 @@
     </div>
   </header>
 
+  <main>
+  <h1 class="sr-only">Dashboard</h1>
   <div class="main">
     <div class="feed-panel">
       <div class="feed-header">
@@ -38,12 +40,14 @@
       <div class="detections-header">
         <h2>Detections</h2>
         <span class="count" id="total-count">0</span>
+        <span class="cap-notice" id="cap-notice" aria-live="polite"></span>
       </div>
       <div class="detections-list" id="detections-list" aria-live="polite">
         <div class="empty-state">Waiting for cars&hellip;<br><span style="font-size:12px;color:var(--text2)">Set up your API key in Settings to start reading plates.</span></div>
       </div>
     </div>
   </div>
+  </main>
 
   <footer class="bottombar">
     <div class="stats">
@@ -59,8 +63,7 @@
   </footer>
 </div>
 
-<dialog id="detail-modal" class="modal">
-  <div class="modal-backdrop"></div>
+<dialog id="detail-modal" class="modal" aria-labelledby="modal-plate">
   <div class="modal-content">
     <div class="modal-header">
       <h2 id="modal-plate">--</h2>
@@ -106,7 +109,8 @@
 </dialog>
 
 <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" integrity="sha384-2huaZvOR9iDzHqslqwpR87isEmrfxqyWOF7hr7BY6KG0+hVKLoEXMPUJw3ynWuhO" crossorigin="anonymous"></script>
-<script>window.io = window.io || null;</script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/pages/dashboard.js"></script>
 <script src="/static/js/app.js"></script>
 </body>
 </html>

@@ -18,7 +18,7 @@
     </div>
   </header>
 
-  <div class="health-page">
+  <main class="health-page">
     <h1><a href="/" class="back-link">←</a> System Health</h1>
     <div class="health-grid" id="health-grid">
       <div class="health-card" data-key="uptime">
@@ -60,128 +60,20 @@
       <div class="health-card health-card-wide" data-key="stats">
         <div class="health-label">Detections</div>
         <div class="health-stats-row" id="h-stats">
-          <div class="health-stat-item"><span class="health-stat-num" id="h-today"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Cars (today)</span></div>
-          <div class="health-stat-item"><span class="health-stat-num" id="h-cars"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Cars</span></div>
-          <div class="health-stat-item"><span class="health-stat-num" id="h-non-cars"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Non-cars</span></div>
-          <div class="health-stat-item"><span class="health-stat-num" id="h-errors"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Errors</span></div>
-          <div class="health-stat-item"><span class="health-stat-num" id="h-unique"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></span><span class="health-stat-label">Plates</span></div>
+          <div class="health-stat-item"><div class="health-stat-num" id="h-today"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></div><span class="health-stat-label">Cars (today)</span></div>
+          <div class="health-stat-item"><div class="health-stat-num" id="h-cars"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></div><span class="health-stat-label">Cars</span></div>
+          <div class="health-stat-item"><div class="health-stat-num" id="h-non-cars"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></div><span class="health-stat-label">Non-cars</span></div>
+          <div class="health-stat-item"><div class="health-stat-num" id="h-errors"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></div><span class="health-stat-label">Errors</span></div>
+          <div class="health-stat-item"><div class="health-stat-num" id="h-unique"><div class="skeleton" style="height:24px;width:40px;margin:0 auto"></div></div><span class="health-stat-label">Plates</span></div>
         </div>
       </div>
     </div>
     <div id="health-loading" class="health-loading" style="display:none"></div>
-  </div>
+  </main>
 </div>
 
-<script>
-function fillHealth() {
-  // Set up DOM targets but leave skeletons in place until data arrives
-  document.querySelectorAll("#health-grid .skeleton").forEach(function(s) {
-    var p = s.parentElement;
-    if (p.id === "h-camera") {
-      if (!document.getElementById("h-camera-dot")) {
-        s.insertAdjacentHTML("beforebegin", '<span class="status-dot" id="h-camera-dot"></span> <span id="h-camera-text">--</span>');
-      }
-      return;
-    }
-    if (p.id === "h-api") {
-      if (!document.getElementById("h-api-dot")) {
-        s.insertAdjacentHTML("beforebegin", '<span class="status-dot" id="h-api-dot"></span> <span id="h-api-text">--</span>');
-      }
-      return;
-    }
-  });
-}
-
-async function loadHealth() {
-  fillHealth();
-  try {
-    const r = await fetch("/api/health");
-    const h = await r.json();
-
-    var u = h.uptime;
-    var dd = Math.floor(u / 86400);
-    var hh = Math.floor((u % 86400) / 3600);
-    var mm = Math.floor((u % 3600) / 60);
-    var ss = u % 60;
-    var uptimeStr = dd > 0 ? dd + "d " : "";
-    uptimeStr += String(hh).padStart(2, "0") + ":" + String(mm).padStart(2, "0") + ":" + String(ss).padStart(2, "0");
-    document.getElementById("h-uptime").textContent = uptimeStr;
-
-    var camDot = document.getElementById("h-camera-dot");
-    var camText = document.getElementById("h-camera-text");
-    if (h.camera.connected) {
-      camDot.className = "status-dot green";
-      camText.textContent = "Connected";
-    } else {
-      camDot.className = "status-dot red";
-      camText.textContent = "Disconnected";
-    }
-
-    var apiDot = document.getElementById("h-api-dot");
-    var apiText = document.getElementById("h-api-text");
-    if (h.api.key_set) {
-      apiDot.className = "status-dot green";
-      apiText.textContent = (h.api.model || "").split("/").pop() || "Ready";
-    } else {
-      apiDot.className = "status-dot yellow";
-      apiText.textContent = "No key";
-    }
-
-    var db = h.database;
-    var dbSize = db.size_bytes;
-    var dbStr = dbSize > 1048576 ? (dbSize / 1048576).toFixed(1) + " MB" : (dbSize / 1024).toFixed(1) + " KB";
-    document.getElementById("h-db").textContent = db.rows + " rows, " + dbStr;
-
-    var disk = h.disk;
-    var freeGb = (disk.free_bytes / 1073741824).toFixed(1);
-    var totalGb = (disk.total_bytes / 1073741824).toFixed(1);
-    document.getElementById("h-disk").textContent = freeGb + " GB free / " + totalGb + " GB (" + disk.percent_used + "% used)";
-
-    var mem = h.memory;
-    var freeMem = (mem.available_bytes / 1073741824).toFixed(1);
-    var totalMem = (mem.total_bytes / 1073741824).toFixed(1);
-    document.getElementById("h-memory").textContent = mem.percent + "% used (" + freeMem + " GB free / " + totalMem + " GB)";
-
-    document.getElementById("h-cpu").textContent = h.cpu_percent + "%";
-
-    var loc = h.location;
-    if (loc.lat && loc.lon) {
-      document.getElementById("h-location").textContent = loc.lat.toFixed(4) + ", " + loc.lon.toFixed(4);
-    } else {
-      document.getElementById("h-location").textContent = "Unknown";
-    }
-
-    var stats = h.stats || {};
-    document.getElementById("h-today").textContent = stats.today || 0;
-    document.getElementById("h-cars").textContent = stats.cars || 0;
-    document.getElementById("h-non-cars").textContent = stats.non_cars || 0;
-    document.getElementById("h-errors").textContent = stats.errors || 0;
-    document.getElementById("h-unique").textContent = stats.unique || 0;
-
-    var q = h.ai_queue || 0;
-    document.getElementById("h-ai-queue").textContent = q + " queued" + (q > 0 ? "" : "");
-    var qInd = document.getElementById("h-indicator-queue");
-    if (q > 0 && qInd) {
-      qInd.style.display = "inline-flex";
-      qInd.innerHTML = '<span aria-hidden="true">📨</span> <span>' + q + ' queued</span>';
-      qInd.className = "indicator active";
-    } else if (qInd) {
-      qInd.style.display = "none";
-    }
-    var aiInd = document.getElementById("h-indicator-ai");
-    if (aiInd) {
-      var ok = h.api && h.api.key_set;
-      var modelName = ((h.api && h.api.model) || "").split("/").pop() || "ready";
-      aiInd.innerHTML = "🤖 <span>" + (ok ? "AI: " + modelName : "AI key missing") + "</span>";
-      aiInd.className = "indicator" + (ok ? " active" : " error");
-    }
-
-  } catch(e) {
-    document.getElementById("health-loading").textContent = "Failed to load health data";
-  }
-}
-loadHealth();
-setInterval(loadHealth, 10000);
-</script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/status-poll.js"></script>
+<script src="/static/js/pages/health.js"></script>
 </body>
 </html>

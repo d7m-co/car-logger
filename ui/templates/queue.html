@@ -5,26 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>AI Queue - Car Logger</title>
 <link rel="stylesheet" href="/static/css/style.css">
-<style>
-.term { background:#0a0a0a; border:1px solid #333; border-radius:6px; font-family:'SF Mono','Fira Code','Consolas',monospace; font-size:13px; line-height:1.7; padding:14px; margin:12px 0; max-height:70vh; overflow-y:auto; color:#ccc; }
-.term .p  { color:#6ee; }
-.term .ts { color:#666; }
-.term .id { color:#69c; }
-.term .queued    { color:#666; }
-.term .processing { color:#fd0; font-weight:bold; }
-.term .retrying  { color:#f80; }
-.term .completed { color:#3c3; }
-.term .skipped  { color:#88a; }
-.term .error     { color:#f44; }
-.term .line { padding:2px 0; display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; border-bottom:1px solid #151515; }
-.term .line:hover { background:#111; }
-.term .hdr  { color:#555; font-size:11px; padding:4px 0; border-bottom:1px solid #252525; margin-bottom:4px; }
-.qstats { display:flex; gap:20px; flex-wrap:wrap; margin:8px 0; }
-.qstats s { font-size:13px; color:#888; }
-.qstats s em { font-style:normal; color:#fff; }
-.idle-msg { color:#555; font-style:italic; text-align:center; padding:40px 0; }
-.br { height:4px; }
-</style>
 </head>
 <body>
 <div class="app">
@@ -36,113 +16,25 @@
       <a href="/" class="btn-icon">⌂</a>
     </div>
   </header>
-  <main class="content">
+  <main class="queue-page">
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
       <h1 style="margin:0">AI Queue</h1>
       <span style="color:#888;font-size:13px" id="q-last-refresh">polling...</span>
     </div>
-    <div class="qstats">
-      <s>📨 queued: <em id="qs-queued">0</em></s>
-      <s>🔄 processing: <em id="qs-processing">0</em></s>
-      <s>✅ completed: <em id="qs-done">0</em></s>
-      <s>❌ errors: <em id="qs-errs">0</em></s>
-      <s>🔄 retrying: <em id="qs-retrying">0</em></s>
-      <s>⏭ skipped: <em id="qs-skipped">0</em></s>
-      <s>⚡ speed: <em id="qs-speed">--</em></s>
+    <div class="qstats" role="status" aria-label="Queue statistics">
+      <span class="qstat-label">📨 queued: <em id="qs-queued">0</em></span>
+      <span class="qstat-label">🔄 processing: <em id="qs-processing">0</em></span>
+      <span class="qstat-label">✅ completed: <em id="qs-done">0</em></span>
+      <span class="qstat-label">❌ errors: <em id="qs-errs">0</em></span>
+      <span class="qstat-label">🔄 retrying: <em id="qs-retrying">0</em></span>
+      <span class="qstat-label">⏭ skipped: <em id="qs-skipped">0</em></span>
+      <span class="qstat-label">⚡ speed: <em id="qs-speed">--</em></span>
     </div>
     <div class="term" id="term"></div>
   </main>
 </div>
-<script>
-var term = document.getElementById("term");
-function id_(s) { return document.getElementById(s); }
-var lastDone = 0, lastTime = Date.now();
-
-function pad2(n) { return (n<10?"0":"")+n; }
-function fmtTime(t) {
-  var d=new Date(t*1000);
-  return pad2(d.getHours())+":"+pad2(d.getMinutes())+":"+pad2(d.getSeconds());
-}
-
-function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-
-function render(reqs) {
-  var html = '<div class="line hdr"><span class="p">$</span> tail -f /var/log/ai-queue — ' + reqs.length + ' entries</div>';
-  var q=0, p=0, d=0, e=0, s=0, ret=0;
-  for (var i=0; i<reqs.length; i++) {
-    var r=reqs[i];
-    if (r.status==="queued") q++;
-    else if (r.status==="processing") p++;
-    else if (r.status==="completed") d++;
-    else if (r.status==="error") e++;
-    else if (r.status==="skipped") s++;
-    else if (r.status==="retrying") ret++;
-
-    var detail="";
-      if (r.status==="completed" && r.result) {
-        if (r.result.is_car) {
-          detail = "🚗 " + esc(r.result.plate||"UNKNOWN");
-          if (r.result.color) detail += " " + esc(r.result.color);
-          if (r.result.make) detail += " " + esc(r.result.make);
-          detail += " [" + esc(r.result.confidence||"none") + "]";
-        } else {
-          detail = "🚫 NON-CAR";
-        }
-      } else if (r.status==="skipped" && r.result) {
-        detail = "⏭ SKIP " + esc(r.error||"");
-      } else if (r.status==="retrying") {
-        detail = "🔄 RETRY #"+ (r.retries||1) + " " + esc(r.error||"");
-      } else if (r.status==="error") {
-        detail = esc(r.error||"API request failed");
-      }
-
-    var elapsed = "";
-    if (r.started_at) {
-      var end = r.completed_at || Date.now()/1000;
-      elapsed = (end - r.started_at).toFixed(1) + "s";
-    }
-
-    html += '<div class="line">';
-    html += '  <span class="ts">' + fmtTime(r.queued_at) + '</span>';
-    html += '  <span class="id">#' + r.id + '</span>';
-    html += '  <span class="' + r.status + '">' + r.status + '</span>';
-    if (detail) html += '  <span>' + detail + '</span>';
-    if (elapsed) html += '  <span class="ts">(' + elapsed + ')</span>';
-    html += '</div>';
-  }
-  if (reqs.length===0) {
-    html += '<div class="idle-msg">⏳ queue idle — no AI requests yet</div>';
-  }
-  term.innerHTML = html;
-  term.scrollTop = term.scrollHeight;
-  id_("qs-queued").textContent = q;
-  id_("qs-processing").textContent = p;
-  id_("qs-done").textContent = d;
-  id_("qs-errs").textContent = e;
-  id_("qs-retrying").textContent = ret;
-  id_("qs-skipped").textContent = s;
-  id_("q-last-refresh").textContent = "last refresh: " + fmtTime(Date.now()/1000);
-  id_("h-indicator-queue").style.display = q>0?"inline-flex":"none";
-  if (q>0) {
-    id_("h-indicator-queue").innerHTML = '<span aria-hidden="true">📨</span> <span>'+q+' queued</span>';
-  }
-  // thrust speed
-  var now = Date.now();
-  var doneDelta = d + e + s - lastDone;
-  var timeDelta = (now - lastTime) / 1000;
-  if (doneDelta > 0 && timeDelta > 0) {
-    var perMin = Math.round(doneDelta / timeDelta * 60);
-    id_("qs-speed").textContent = perMin + "/min";
-  }
-  lastDone = d + e + s;
-  lastTime = now;
-}
-
-function poll() {
-  fetch("/api/queue").then(function(r){return r.json();}).then(render).catch(function(){});
-  setTimeout(poll, 2000);
-}
-poll();
-</script>
+<script src="/static/js/utils.js"></script>
+<script src="/static/js/status-poll.js"></script>
+<script src="/static/js/pages/queue.js"></script>
 </body>
 </html>

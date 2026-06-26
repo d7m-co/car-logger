@@ -4,7 +4,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 DEFAULTS = {
   "openrouter_api_key": "",
-  "openrouter_model": "google/gemma-4-26b-a4b-it:free",
+  "opencode_go_api_key": "",
   "camera_id": 0,
   "resolution": [720, 480],
   "fps_motion": 10,
@@ -41,6 +41,18 @@ class Config:
     os.makedirs(os.path.dirname(CONFIG_PATH) or ".", exist_ok=True)
     with open(CONFIG_PATH, "w") as f:
       json.dump(self.data, f, indent=2)
+    try:
+      os.chmod(CONFIG_PATH, 0o600)
+    except (OSError, NotImplementedError):
+      pass
+
+  @classmethod
+  def secure_config_file(cls):
+    if os.path.exists(CONFIG_PATH):
+      try:
+        os.chmod(CONFIG_PATH, 0o600)
+      except (OSError, NotImplementedError):
+        pass
 
   def get(self, key, default=None):
     return self.data.get(key, default)
@@ -55,7 +67,15 @@ class Config:
 
   @property
   def api_key_set(self):
+    return bool(self.data.get("openrouter_api_key") or self.data.get("opencode_go_api_key"))
+
+  @property
+  def or_key_set(self):
     return bool(self.data.get("openrouter_api_key"))
+
+  @property
+  def go_key_set(self):
+    return bool(self.data.get("opencode_go_api_key"))
 
   @property
   def detection_zone_percent(self):
