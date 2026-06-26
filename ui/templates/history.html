@@ -69,6 +69,8 @@ var allRows = [];
 
 function getEl(id) { return document.getElementById(id); }
 
+function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
 function aiLabelHtml(label) {
   if (label === "car") return '<span class="badge badge-car">🚗 Car</span>';
   if (label === "non_car") return '<span class="badge badge-non-car">🚫 Not a car</span>';
@@ -117,7 +119,8 @@ async function loadHistory(search, append) {
     if (!append) tbody.innerHTML = "";
 
     if (rows.length === 0 && !append) {
-      tbody.innerHTML = '<tr><td colspan="7" class="empty">No detections yet. Park near a camera to start logging.</td></tr>';
+      var msg = (currentSearch || currentFilter) ? 'No detections match your filter. <a href="/history" style="color:var(--accent2)">Clear filters</a>' : 'No detections yet. Park near a camera to start logging.';
+      tbody.innerHTML = '<tr><td colspan="7" class="empty">' + msg + '</td></tr>';
       getEl("btn-load-more").style.display = "none";
       hasMore = false;
     } else {
@@ -127,13 +130,13 @@ async function loadHistory(search, append) {
         var imgFile = row.image_path ? row.image_path.split("/").pop() : null;
         tr.dataset.id = row.id;
         tr.innerHTML =
-          '<td><input type="checkbox" class="row-check" data-id="' + row.id + '" aria-label="Select row"></td>' +
+          '<td><input type="checkbox" class="row-check" data-id="' + escHtml(row.id) + '" aria-label="Select row"></td>' +
           '<td>' + aiLabelHtml(row.ai_label) + '</td>' +
-          '<td class="plate-cell">' + (row.plate || "--") + '</td>' +
-          '<td class="ts-cell">' + (row.timestamp || row.created_at || "").split(".")[0].replace("T", " ") + '</td>' +
-          '<td>' + (row.vehicle_info || "--") + '</td>' +
-          '<td>' + (row.latitude ? row.latitude.toFixed(4) + ", " + row.longitude.toFixed(4) : "--") + '</td>' +
-          '<td>' + (imgFile ? '<a href="/snaps/' + imgFile + '" target="_blank">View</a>' : "--") + '</td>';
+          '<td class="plate-cell">' + escHtml(row.plate || "--") + '</td>' +
+          '<td class="ts-cell">' + escHtml((row.timestamp || row.created_at || "").split(".")[0].replace("T", " ")) + '</td>' +
+          '<td>' + escHtml(row.vehicle_info || "--") + '</td>' +
+          '<td>' + (row.latitude ? escHtml(row.latitude.toFixed(4) + ", " + row.longitude.toFixed(4)) : "--") + '</td>' +
+          '<td>' + (imgFile ? '<a href="/snaps/' + escHtml(imgFile) + '" target="_blank">View</a>' : "--") + '</td>';
         tbody.appendChild(tr);
       }
       currentOffset += rows.length;

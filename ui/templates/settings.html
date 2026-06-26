@@ -21,11 +21,11 @@
     <section class="settings-group">
       <h3>OpenRouter AI</h3>
       <label>API Key</label>
-      <input type="password" id="api-key" placeholder="sk-or-v1-..." class="input">
+      <input type="password" id="api-key" placeholder="sk-or-v1-..." class="input" disabled>
       <span class="help-text">Get a free key at <a href="https://openrouter.ai/keys" target="_blank" class="help-link">openrouter.ai/keys</a>. Required for license plate reading.</span>
 
       <label>Model</label>
-      <select id="model" class="input">
+      <select id="model" class="input" disabled>
         <option value="meta-llama/llama-3.2-11b-vision-instruct:free">Llama 3.2 Vision (free)</option>
         <option value="openai/gpt-4o-mini">GPT-4o Mini (paid)</option>
         <option value="openai/gpt-4o">GPT-4o (paid)</option>
@@ -37,19 +37,19 @@
     <section class="settings-group">
       <h3>Detection</h3>
       <label>Sensitivity <span class="help-inline" id="sens-label">50</span></label>
-      <input type="range" id="sensitivity" min="10" max="100" value="50" class="slider">
+      <input type="range" id="sensitivity" min="10" max="100" value="50" class="slider" disabled>
       <span class="help-text">Higher values detect smaller movements. Adjust if you get too many or too few triggers.</span>
 
       <label>Min Car Size (pixels)</label>
-      <input type="number" id="min-car-area" class="input input-sm" min="100" max="10000" placeholder="500">
+      <input type="number" id="min-car-area" class="input input-sm" min="100" max="10000" placeholder="500" disabled>
       <span class="help-text">Smallest car area to detect. Lower = more sensitive to distant cars.</span>
 
       <label>Duplicate Window (seconds)</label>
-      <input type="number" id="dedup-seconds" class="input input-sm" min="10" max="3600" placeholder="60">
+      <input type="number" id="dedup-seconds" class="input input-sm" min="10" max="3600" placeholder="60" disabled>
       <span class="help-text">Ignore repeat sightings of the same plate within this window. Prevents duplicates.</span>
 
       <label>Resolution</label>
-      <select id="resolution" class="input">
+      <select id="resolution" class="input" disabled>
         <option value="640,480">640x480 (Low, battery savings)</option>
         <option value="720,480" selected>720x480 (Default)</option>
         <option value="1280,720">1280x720 (HD)</option>
@@ -58,12 +58,12 @@
 
     <section class="settings-group">
       <h3>Location</h3>
-      <label><input type="checkbox" id="location-auto" checked> Auto locate (WiFi)</label>
+      <label><input type="checkbox" id="location-auto" checked disabled> Auto locate (WiFi)</label>
       <div id="manual-loc" style="display:none">
         <label>Latitude</label>
-        <input type="number" step="any" id="loc-lat" class="input input-md" min="-90" max="90" placeholder="0.0">
+        <input type="number" step="any" id="loc-lat" class="input input-md" min="-90" max="90" placeholder="0.0" disabled>
         <label>Longitude</label>
-        <input type="number" step="any" id="loc-lon" class="input input-md" min="-180" max="180" placeholder="0.0">
+        <input type="number" step="any" id="loc-lon" class="input input-md" min="-180" max="180" placeholder="0.0" disabled>
       </div>
       <span class="help-text">Auto uses WiFi geolocation. Manual lets you set a fixed position.</span>
     </section>
@@ -71,12 +71,12 @@
     <section class="settings-group">
       <h3>Server</h3>
       <label>Port</label>
-      <input type="number" id="server-port" class="input input-sm" min="1024" max="65535" placeholder="5000">
+      <input type="number" id="server-port" class="input input-sm" min="1024" max="65535" placeholder="5000" disabled>
       <span class="help-text">The dashboard port. Must be between 1024 and 65535. Restart required to change.</span>
     </section>
 
     <div class="settings-actions">
-      <button class="btn primary" id="btn-save">Save</button>
+      <button class="btn primary" id="btn-save" disabled>Save</button>
       <a href="/" class="btn">Cancel</a>
       <span id="save-msg" class="save-msg"></span>
     </div>
@@ -106,6 +106,8 @@ async function loadConfig() {
     getEl("server-port").value = cfg.server_port;
     toggleManualLoc();
     _configLoaded = true;
+    document.querySelectorAll(".settings-page [disabled]").forEach(function(el) { el.disabled = false; });
+    getEl("btn-save").disabled = false;
   } catch(e) {
     showMsg("Failed to load settings: " + e.message, "error");
   }

@@ -57,7 +57,15 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
 
   app = Flask(__name__, template_folder="ui/templates", static_folder="ui/static")
   app.config["SECRET_KEY"] = os.urandom(16).hex()
-  socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+  socketio = SocketIO(app, cors_allowed_origins="http://localhost:5000", async_mode="threading")
+
+  @app.after_request
+  def add_security_headers(resp):
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.socket.io; connect-src 'self' ws: http://localhost:5000;"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    return resp
 
   camera_started = False
 
@@ -73,9 +81,10 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
   def history_page():
     return send_from_directory("ui/templates", "history.html")
 
-  @app.route("/snaps/<filename>")
+  @app.route("/snaps/<path:filename>")
   def serve_snap(filename):
-    return send_from_directory(config.get("snaps_dir", "data/snaps"), filename)
+    sanitized = os.path.basename(filename)
+    return send_from_directory(config.get("snaps_dir", "data/snaps"), sanitized)
 
   @app.route("/video_feed")
   def video_feed():
@@ -99,15 +108,25 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
 
   @app.route("/api/config", methods=["GET"])
   def get_config():
-    return jsonify(config.data)
+    safe = {k: v for k, v in config.data.items() if k != "openrouter_api_key"}
+    safe["openrouter_api_key"] = bool(config.get("openrouter_api_key"))
+    return jsonify(safe)
+
+  CONFIG_ALLOWED_KEYS = {"openrouter_api_key", "openrouter_model", "camera_id", "resolution", "fps_motion", "fps_idle", "idle_timeout", "sensitivity", "min_car_area", "dedup_seconds", "location_auto", "location_lat", "location_lon", "location_refresh_minutes", "server_port", "save_snaps", "snap_quality", "snaps_dir", "auto_start", "detection_zone"}
 
   @app.route("/api/config", methods=["POST"])
   def set_config():
+    origin = request.headers.get("Origin", "")
+    if origin and origin not in ("http://localhost:5000", f"http://127.0.0.1:{config.get('server_port', 5000)}"):
+      return jsonify({"status": "error", "message": "Invalid origin"}), 403
     data = request.get_json()
-    if data:
-      config.set_many(data)
-      return jsonify({"status": "ok"})
-    return jsonify({"status": "error", "message": "No settings data received. Try again."}), 400
+    if not data:
+      return jsonify({"status": "error", "message": "No settings data received. Try again."}), 400
+    filtered = {k: v for k, v in data.items() if k in CONFIG_ALLOWED_KEYS}
+    if not filtered:
+      return jsonify({"status": "error", "message": "No valid settings keys."}), 400
+    config.set_many(filtered)
+    return jsonify({"status": "ok"})
 
   @app.route("/api/history")
   def get_history():

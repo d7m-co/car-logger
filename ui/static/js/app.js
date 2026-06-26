@@ -1,29 +1,31 @@
 var audioCtx = null;
+var audioInitialized = false;
 
-function getAudioCtx() {
-  if (!audioCtx) {
-    try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); } catch(e) {}
-  }
-  if (audioCtx && audioCtx.state === "suspended") {
-    audioCtx.resume();
-  }
-  return audioCtx;
+function initAudio() {
+  if (audioInitialized) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    audioInitialized = true;
+  } catch(e) {}
 }
 
 function playChime() {
-  var ctx = getAudioCtx();
-  if (!ctx) return;
+  if (!audioInitialized) return;
+  if (audioCtx && audioCtx.state === "suspended") {
+    audioCtx.resume();
+  }
+  if (!audioCtx) return;
   try {
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
+    var osc = audioCtx.createOscillator();
+    var gain = audioCtx.createGain();
     osc.connect(gain);
-    gain.connect(ctx.destination);
+    gain.connect(audioCtx.destination);
     osc.frequency.value = 880;
     osc.type = "sine";
-    gain.gain.setValueAtTime(0.25, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.35);
+    gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.35);
+    osc.start(audioCtx.currentTime);
+    osc.stop(audioCtx.currentTime + 0.35);
   } catch(e) {}
 }
 
@@ -107,6 +109,10 @@ document.addEventListener("DOMContentLoaded", function() {
   });
   feedContainer.appendChild(feedError);
 
+  // Init audio on first user gesture (required by iOS/Safari)
+  document.addEventListener("click", initAudio, {once: true});
+  document.addEventListener("keydown", initAudio, {once: true});
+
   // Keyboard shortcuts
   document.addEventListener("keydown", function(e) {
     if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
@@ -163,6 +169,8 @@ document.addEventListener("DOMContentLoaded", function() {
     return '<span class="badge badge-unknown">--</span>';
   }
 
+  function escHtml(s) { return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
   function addDetection(data) {
     detectionCount++;
     totalCount.textContent = detectionCount;
@@ -181,11 +189,15 @@ document.addEventListener("DOMContentLoaded", function() {
     item.dataset.color = data.color || "";
     item.dataset.make = data.make || "";
     item.dataset.rawAi = data.raw_ai || "";
+
+    var plateHtml = data.plate ? escHtml(data.plate) : aiLabelHtml(data.ai_label);
+    var vehicleHtml = data.vehicle_info ? escHtml(data.vehicle_info) : aiLabelHtml(data.ai_label);
+    var timeHtml = escHtml((data.timestamp || "").split(".")[0].replace("T", " "));
     item.innerHTML =
-      '<div class="plate">' + (data.plate || aiLabelHtml(data.ai_label)) + '</div>' +
+      '<div class="plate">' + plateHtml + '</div>' +
       '<div class="info">' +
-        '<div class="vehicle">' + (data.vehicle_info || aiLabelHtml(data.ai_label)) + '</div>' +
-        '<div class="time">' + ((data.timestamp || "").split(".")[0].replace("T", " ") || "") + '</div>' +
+        '<div class="vehicle">' + vehicleHtml + '</div>' +
+        '<div class="time">' + timeHtml + '</div>' +
       '</div>';
 
     item.addEventListener("click", function() {
@@ -219,14 +231,18 @@ document.addEventListener("DOMContentLoaded", function() {
     if (d.rawai) {
       rawEl.textContent = d.rawai;
       rawRow.style.display = "flex";
+    } else if (d.rawAi) {
+      rawEl.textContent = d.rawAi;
+      rawRow.style.display = "flex";
     } else {
       rawRow.style.display = "none";
     }
 
     var img = document.getElementById("modal-image");
     var fallback = document.getElementById("modal-image-fallback");
-    if (d.image) {
-      img.src = "/snaps/" + d.image;
+    var imgFile = d.image ? d.image.split("/").pop() : null;
+    if (imgFile) {
+      img.src = "/snaps/" + imgFile;
       img.style.display = "block";
       fallback.style.display = "none";
     } else {
@@ -305,6 +321,10 @@ document.addEventListener("DOMContentLoaded", function() {
       statTotal.textContent = stats.total || 0;
       statUnique.textContent = stats.unique || 0;
       badgeCars.innerHTML = "🚘 " + (stats.today || 0);
+      if (stats.total > detectionCount) {
+        detectionCount = stats.total;
+        totalCount.textContent = stats.total;
+      }
 
     } catch (e) {
       indCamera.innerHTML = "📷 <span>Server unreachable</span>";

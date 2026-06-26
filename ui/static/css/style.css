@@ -130,6 +130,9 @@ body {
   padding: 8px 12px; color: var(--text); font-size: 14px; width: 100%;
 }
 .input:focus { outline: none; border-color: var(--accent2); }
+.input:focus-visible { outline: 2px solid var(--accent2); outline-offset: 1px; }
+.detection-item:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
+.btn:focus-visible, .btn-icon:focus-visible, .filter-btn:focus-visible { outline: 2px solid var(--accent2); outline-offset: 2px; }
 select.input { cursor: pointer; }
 .slider { width: 100%; accent-color: var(--accent2); margin: 4px 0; }
 .back-link { color: var(--text2); text-decoration: none; margin-right: 8px; font-size: 18px; }

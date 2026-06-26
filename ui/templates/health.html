@@ -65,28 +65,27 @@
         </div>
       </div>
     </div>
+    <div id="health-loading" class="health-loading" style="display:none"></div>
   </div>
 </div>
 
 <script>
 function fillHealth() {
-  // Replace skeleton placeholders with real values
+  // Set up DOM targets but leave skeletons in place until data arrives
   document.querySelectorAll("#health-grid .skeleton").forEach(function(s) {
     var p = s.parentElement;
-    if (p.id === "h-uptime") { p.innerHTML = "--"; return; }
-    if (p.id === "h-camera") { p.innerHTML = '<span class="status-dot" id="h-camera-dot"></span> <span id="h-camera-text">--</span>'; return; }
-    if (p.id === "h-api") { p.innerHTML = '<span class="status-dot" id="h-api-dot"></span> <span id="h-api-text">--</span>'; return; }
-    if (p.id === "h-db") { p.textContent = "--"; return; }
-    if (p.id === "h-disk") { p.textContent = "--"; return; }
-    if (p.id === "h-memory") { p.textContent = "--"; return; }
-    if (p.id === "h-cpu") { p.textContent = "--"; return; }
-    if (p.id === "h-location") { p.textContent = "--"; return; }
-    if (p.id === "h-ai-queue") { p.textContent = "--"; return; }
-    s.remove();
-  });
-  // Restore stat placeholders
-  document.querySelectorAll(".health-stat-num").forEach(function(n) {
-    if (n.querySelector(".skeleton")) n.innerHTML = "0";
+    if (p.id === "h-camera") {
+      if (!document.getElementById("h-camera-dot")) {
+        s.insertAdjacentHTML("beforebegin", '<span class="status-dot" id="h-camera-dot"></span> <span id="h-camera-text">--</span>');
+      }
+      return;
+    }
+    if (p.id === "h-api") {
+      if (!document.getElementById("h-api-dot")) {
+        s.insertAdjacentHTML("beforebegin", '<span class="status-dot" id="h-api-dot"></span> <span id="h-api-text">--</span>');
+      }
+      return;
+    }
   });
 }
 
