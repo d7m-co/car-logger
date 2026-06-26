@@ -17,7 +17,7 @@ class PlateReader:
   def __init__(self, config):
     self.config = config
     self.api_key = config.get("openrouter_api_key", "")
-    self.model = config.get("openrouter_model", "openrouter/free")
+    self.model = config.get("openrouter_model", "google/gemma-4-26b-a4b-it:free")
     self._req_queue = queue.Queue()  # unlimited
     self._last_api_call = 0
     self._base_api_interval = 15.0
@@ -119,30 +119,44 @@ class PlateReader:
         if err and ("rate" in err.lower() or "429" in err):
           self._cooldown_until = time.time() + 20
         self._current_id = None
+        final = True  # whether this request is final (no more retries)
         with self._lock:
           if req_id in self._requests:
             if err:
-              self._requests[req_id]["status"] = "error"
-              self._requests[req_id]["error"] = err
+              retries = self._requests[req_id].get("retries", 0) + 1
+              self._requests[req_id]["retries"] = retries
+              if retries >= 5:
+                self._requests[req_id]["status"] = "error"
+                self._requests[req_id]["error"] = err
+                self._requests[req_id]["completed_at"] = time.time()
+              else:
+                final = False
+                # backoff: advance timer so retry waits longer
+                self._last_api_call += min(retries * 5, 30)
+                self._requests[req_id]["status"] = "retrying"
+                self._requests[req_id]["error"] = err
+                self._req_queue.put_nowait((req_id, pil_image, callback))
             elif result is None:
               self._requests[req_id]["status"] = "error"
               self._requests[req_id]["error"] = "AI returned no result"
+              self._requests[req_id]["completed_at"] = time.time()
             elif skip:
               self._requests[req_id]["status"] = "skipped"
               self._requests[req_id]["error"] = skip_reason
               self._requests[req_id]["result"] = result
+              self._requests[req_id]["completed_at"] = time.time()
             else:
               self._requests[req_id]["status"] = "completed"
               self._requests[req_id]["result"] = result
+              self._requests[req_id]["completed_at"] = time.time()
               if result:
                 self._last_hash = this_hash
                 self._last_result = result
               else:
                 self._last_hash = None
                 self._last_result = None
-            self._requests[req_id]["completed_at"] = time.time()
         self._notify()
-        if callback:
+        if final and callback:
           callback(result)
       except queue.Empty:
         continue

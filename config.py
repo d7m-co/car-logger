@@ -4,7 +4,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
 DEFAULTS = {
   "openrouter_api_key": "",
-  "openrouter_model": "openrouter/free",
+  "openrouter_model": "google/gemma-4-26b-a4b-it:free",
   "camera_id": 0,
   "resolution": [720, 480],
   "fps_motion": 10,
