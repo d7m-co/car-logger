@@ -61,7 +61,7 @@ def create_app(config, detector, logger, location_obj, camera, plate_reader):
 
   @app.after_request
   def add_security_headers(resp):
-    resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' https://cdn.socket.io; connect-src 'self' ws: http://localhost:5000;"
+    resp.headers["Content-Security-Policy"] = "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' https://cdn.socket.io; connect-src 'self' ws: http://localhost:5000;"
     resp.headers["X-Content-Type-Options"] = "nosniff"
     resp.headers["X-Frame-Options"] = "DENY"
     resp.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"

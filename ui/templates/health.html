@@ -10,7 +10,9 @@
 <div class="app">
   <header class="topbar">
     <div class="logo">🚗 Car Logger</div>
-    <div class="topbar-right">
+    <div class="topbar-right" role="status" aria-label="System status">
+      <span class="indicator" id="h-indicator-queue" style="display:none"><span aria-hidden="true">📨</span> <span></span></span>
+      <span class="indicator" id="h-indicator-ai">🤖 <span>--</span></span>
       <a href="/" class="btn-icon">⌂</a>
     </div>
   </header>
@@ -157,6 +159,21 @@ async function loadHealth() {
 
     var q = h.ai_queue || 0;
     document.getElementById("h-ai-queue").textContent = q + " queued" + (q > 0 ? "" : "");
+    var qInd = document.getElementById("h-indicator-queue");
+    if (q > 0 && qInd) {
+      qInd.style.display = "inline-flex";
+      qInd.innerHTML = '<span aria-hidden="true">📨</span> <span>' + q + ' queued</span>';
+      qInd.className = "indicator active";
+    } else if (qInd) {
+      qInd.style.display = "none";
+    }
+    var aiInd = document.getElementById("h-indicator-ai");
+    if (aiInd) {
+      var ok = h.api && h.api.key_set;
+      var modelName = ((h.api && h.api.model) || "").split("/").pop() || "ready";
+      aiInd.innerHTML = "🤖 <span>" + (ok ? "AI: " + modelName : "AI key missing") + "</span>";
+      aiInd.className = "indicator" + (ok ? " active" : " error");
+    }
 
   } catch(e) {
     document.getElementById("health-loading").textContent = "Failed to load health data";

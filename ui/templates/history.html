@@ -10,7 +10,9 @@
 <div class="app">
   <header class="topbar">
     <div class="logo">🚗 Car Logger</div>
-    <div class="topbar-right">
+    <div class="topbar-right" role="status" aria-label="System status">
+      <span class="indicator" id="h-indicator-queue" style="display:none"><span aria-hidden="true">📨</span> <span></span></span>
+      <span class="indicator" id="h-indicator-ai">🤖 <span>--</span></span>
       <a href="/" class="btn-icon">⌂</a>
     </div>
   </header>
@@ -285,6 +287,29 @@ fetch("/api/plates").then(function(r) { return r.json(); }).then(function(plates
 });
 
 loadHistory("", false);
+
+// Status polling for queue indicator
+(function pollHistoryStatus() {
+  fetch("/api/status").then(function(r) { return r.json(); }).then(function(s) {
+    var q = s.ai_queue || 0;
+    var el = document.getElementById("h-indicator-queue");
+    var aiEl = document.getElementById("h-indicator-ai");
+    if (q > 0 && el) {
+      el.style.display = "inline-flex";
+      el.innerHTML = '<span aria-hidden="true">📨</span> <span>' + q + " queued</span>";
+      el.className = "indicator active";
+    } else if (el) {
+      el.style.display = "none";
+    }
+    if (aiEl) {
+      var ok = s.api_key;
+      var modelName = (s.model || "").split("/").pop() || "ready";
+      aiEl.innerHTML = "🤖 <span>" + (ok ? "AI: " + modelName : "AI key missing") + "</span>";
+      aiEl.className = "indicator" + (ok ? " active" : " error");
+    }
+  }).catch(function() {});
+  setTimeout(pollHistoryStatus, 5000);
+})();
 </script>
 </body>
 </html>
