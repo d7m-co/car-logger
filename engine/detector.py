@@ -10,7 +10,8 @@ class Detector:
     )
     self.kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
     self._last_motion_time = time.time()
-    self._capture_frame = 0
+    self._last_capture_time = 0
+    self._min_capture_gap = 1.0
 
   def process(self, frame):
     h, w = frame.shape[:2]
@@ -58,10 +59,11 @@ class Detector:
 
     trigger_capture = False
     captured_car = None
-    if motion:
+    if motion and (now - self._last_capture_time) >= self._min_capture_gap:
       best = max(cars_in_zone, key=lambda c: c["area"])
       trigger_capture = True
       captured_car = best
+      self._last_capture_time = now
 
     result_frame = frame.copy()
     cv2.rectangle(result_frame, (zx1, zy1), (zx2, zy2), (0, 255, 255), 2)

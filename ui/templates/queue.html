@@ -13,6 +13,7 @@
 .term .queued    { color:#666; }
 .term .processing { color:#fd0; font-weight:bold; }
 .term .completed { color:#3c3; }
+.term .skipped  { color:#88a; }
 .term .error     { color:#f44; }
 .term .line { padding:2px 0; display:flex; flex-wrap:wrap; gap:4px; align-items:baseline; border-bottom:1px solid #151515; }
 .term .line:hover { background:#111; }
@@ -44,6 +45,7 @@
       <s>🔄 processing: <em id="qs-processing">0</em></s>
       <s>✅ completed: <em id="qs-done">0</em></s>
       <s>❌ errors: <em id="qs-errs">0</em></s>
+      <s>⏭ skipped: <em id="qs-skipped">0</em></s>
       <s>⚡ speed: <em id="qs-speed">--</em></s>
     </div>
     <div class="term" id="term"></div>
@@ -64,27 +66,30 @@ function esc(s) { return String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g
 
 function render(reqs) {
   var html = '<div class="line hdr"><span class="p">$</span> tail -f /var/log/ai-queue — ' + reqs.length + ' entries</div>';
-  var q=0, p=0, d=0, e=0;
+  var q=0, p=0, d=0, e=0, s=0;
   for (var i=0; i<reqs.length; i++) {
     var r=reqs[i];
     if (r.status==="queued") q++;
     else if (r.status==="processing") p++;
     else if (r.status==="completed") d++;
     else if (r.status==="error") e++;
+    else if (r.status==="skipped") s++;
 
     var detail="";
-    if (r.status==="completed" && r.result) {
-      if (r.result.is_car) {
-        detail = "🚗 " + esc(r.result.plate||"UNKNOWN");
-        if (r.result.color) detail += " " + esc(r.result.color);
-        if (r.result.make) detail += " " + esc(r.result.make);
-        detail += " [" + esc(r.result.confidence||"none") + "]";
-      } else {
-        detail = "🚫 NON-CAR";
+      if (r.status==="completed" && r.result) {
+        if (r.result.is_car) {
+          detail = "🚗 " + esc(r.result.plate||"UNKNOWN");
+          if (r.result.color) detail += " " + esc(r.result.color);
+          if (r.result.make) detail += " " + esc(r.result.make);
+          detail += " [" + esc(r.result.confidence||"none") + "]";
+        } else {
+          detail = "🚫 NON-CAR";
+        }
+      } else if (r.status==="skipped" && r.result) {
+        detail = "⏭ SKIP " + esc(r.error||"");
+      } else if (r.status==="error") {
+        detail = esc(r.error||"API request failed");
       }
-    } else if (r.status==="error") {
-      detail = esc(r.error||"API request failed");
-    }
 
     var elapsed = "";
     if (r.started_at) {
@@ -109,6 +114,7 @@ function render(reqs) {
   id_("qs-processing").textContent = p;
   id_("qs-done").textContent = d;
   id_("qs-errs").textContent = e;
+  id_("qs-skipped").textContent = s;
   id_("q-last-refresh").textContent = "last refresh: " + fmtTime(Date.now()/1000);
   id_("h-indicator-queue").style.display = q>0?"inline-flex":"none";
   if (q>0) {
@@ -116,13 +122,13 @@ function render(reqs) {
   }
   // thrust speed
   var now = Date.now();
-  var doneDelta = d + e - lastDone;
+  var doneDelta = d + e + s - lastDone;
   var timeDelta = (now - lastTime) / 1000;
   if (doneDelta > 0 && timeDelta > 0) {
     var perMin = Math.round(doneDelta / timeDelta * 60);
     id_("qs-speed").textContent = perMin + "/min";
   }
-  lastDone = d + e;
+  lastDone = d + e + s;
   lastTime = now;
 }
 

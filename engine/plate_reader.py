@@ -3,6 +3,16 @@ from io import BytesIO
 from PIL import Image
 import requests
 
+def _average_hash(pil_image, size=8):
+  '''64-bit perceptual hash — similar images have small Hamming distance'''
+  img = pil_image.convert("L").resize((size, size), Image.LANCZOS)
+  pixels = list(img.getdata())
+  avg = sum(pixels) / len(pixels)
+  return sum((1 if p > avg else 0) << i for i, p in enumerate(pixels))
+
+def _hamming_distance(a, b):
+  return bin(a ^ b).count("1")
+
 class PlateReader:
   def __init__(self, config):
     self.config = config
@@ -10,7 +20,7 @@ class PlateReader:
     self.model = config.get("openrouter_model", "openrouter/free")
     self._req_queue = queue.Queue()  # unlimited
     self._last_api_call = 0
-    self._base_api_interval = 10.0
+    self._base_api_interval = 15.0
     self._cooldown_until = 0.0
     self._worker = None
     self._running = False
@@ -19,6 +29,9 @@ class PlateReader:
     self._next_id = 1
     self._current_id = None
     self._on_update = None
+    self._last_hash = None
+    self._last_plate = None
+    self._dedup_window = 10.0
 
   def set_on_update(self, callback):
     self._on_update = callback
@@ -55,8 +68,8 @@ class PlateReader:
     '''thrust: faster when queue is deep, coast when shallow'''
     q = self._req_queue.qsize()
     base = self._base_api_interval
-    if q >= 30: return max(base - 2, 5.0)
-    if q >= 15: return max(base - 1, 6.0)
+    if q >= 30: return max(base - 3, 8.0)
+    if q >= 15: return max(base - 2, 10.0)
     if q >= 5:  return base
     return base
 
@@ -78,10 +91,33 @@ class PlateReader:
             self._requests[req_id]["status"] = "processing"
             self._requests[req_id]["started_at"] = time.time()
         self._notify()
-        result, err = self._do_read_plate(pil_image)
+
+        # Frame dedup: skip if same car as previous result
+        with self._lock:
+          this_hash = self._requests.get(req_id, {}).get("phash")
+          skip = False
+          skip_reason = None
+          if this_hash is not None and self._last_hash is not None and _hamming_distance(this_hash, self._last_hash) < 15:
+            # Same car — skip, use previous result
+            skip = True
+            skip_reason = f"same car as previous (hash diff < 12)"
+            result = self._last_result
+            err = None
+            # Find the previous request ID that had this plate
+            prev_id = None
+            for rid, r in self._requests.items():
+              if rid != req_id and r.get("status") == "completed" and r.get("result") and r["result"].get("plate"):
+                prev_id = rid
+                break
+            if prev_id:
+              skip_reason += f", see #{prev_id}"
+
+        if not skip:
+          result, err = self._do_read_plate(pil_image)
+
         self._last_api_call = time.time()
         if err and ("rate" in err.lower() or "429" in err):
-          self._cooldown_until = time.time() + 15
+          self._cooldown_until = time.time() + 20
         self._current_id = None
         with self._lock:
           if req_id in self._requests:
@@ -91,9 +127,19 @@ class PlateReader:
             elif result is None:
               self._requests[req_id]["status"] = "error"
               self._requests[req_id]["error"] = "AI returned no result"
+            elif skip:
+              self._requests[req_id]["status"] = "skipped"
+              self._requests[req_id]["error"] = skip_reason
+              self._requests[req_id]["result"] = result
             else:
               self._requests[req_id]["status"] = "completed"
               self._requests[req_id]["result"] = result
+              if result:
+                self._last_hash = this_hash
+                self._last_result = result
+              else:
+                self._last_hash = None
+                self._last_result = None
             self._requests[req_id]["completed_at"] = time.time()
         self._notify()
         if callback:
@@ -105,6 +151,7 @@ class PlateReader:
     if not self.api_key:
       return None
     now = time.time()
+    phash = _average_hash(pil_image)
     with self._lock:
       req_id = self._next_id
       self._next_id += 1
@@ -116,6 +163,7 @@ class PlateReader:
         "completed_at": None,
         "result": None,
         "error": None,
+        "phash": phash,
       }
       self._requests[req_id] = req
     self._req_queue.put_nowait((req_id, pil_image, callback))
