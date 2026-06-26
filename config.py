@@ -12,7 +12,7 @@ DEFAULTS = {
   "idle_timeout": 5,
   "detection_zone": [0, 0, 100, 100],
   "sensitivity": 50,
-  "min_car_area": 500,
+  "min_car_area": 100,
   "dedup_seconds": 60,
   "location_auto": True,
   "location_lat": 0.0,

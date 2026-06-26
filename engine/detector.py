@@ -29,7 +29,7 @@ class Detector:
     _, fg_mask = cv2.threshold(fg_mask, 200, 255, cv2.THRESH_BINARY)
 
     contours, _ = cv2.findContours(fg_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    min_area = self.config.get("min_car_area", 500)
+    min_area = self.config.get("min_car_area", 100)
 
     cars = []
     for cnt in contours:
@@ -40,10 +40,10 @@ class Detector:
       aspect = bw / max(bh, 1)
       # Cars are wider than tall (aspect > 1.0) from typical camera angle.
       # People/pets are taller than wide (aspect < 0.6).
-      if aspect < 0.8 or aspect > 3.0:
+      if aspect < 0.5 or aspect > 5.0:
         continue
-      # Car bottom should be near ground (lower 60% of frame)
-      if y + bh < h * 0.4:
+      # Car bottom should be near ground (lower 80% of frame)
+      if y + bh < h * 0.2:
         continue
       cx, cy = x + bw // 2, y + bh // 2
       cars.append({"bbox": (x, y, bw, bh), "center": (cx, cy), "area": area})
@@ -66,7 +66,7 @@ class Detector:
       self._capture_ready = False
       self._capture_cooldown = now
 
-    if not self._capture_ready and (now - self._capture_cooldown) > 3:
+    if not self._capture_ready and (now - self._capture_cooldown) > 1.5:
       self._capture_ready = True
 
     result_frame = frame.copy()

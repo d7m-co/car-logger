@@ -8,8 +8,9 @@ class PlateReader:
     self.config = config
     self.api_key = config.get("openrouter_api_key", "")
     self.model = config.get("openrouter_model", "openrouter/free")
-    self._last_call = 0
-    self._min_interval = 5.0
+    self._req_queue = queue.Queue(maxsize=20)
+    self._last_api_call = 0
+    self._min_api_interval = 10.0
     self._req_queue = queue.Queue(maxsize=20)
     self._worker = None
     self._running = False
@@ -55,6 +56,10 @@ class PlateReader:
       try:
         item = self._req_queue.get(timeout=1)
         req_id, pil_image, callback = item
+        now = time.time()
+        since_last = now - self._last_api_call
+        if since_last < self._min_api_interval:
+          time.sleep(self._min_api_interval - since_last)
         self._current_id = req_id
         with self._lock:
           if req_id in self._requests:
@@ -62,6 +67,9 @@ class PlateReader:
             self._requests[req_id]["started_at"] = time.time()
         self._notify()
         result, err = self._do_read_plate(pil_image)
+        self._last_api_call = time.time()
+        if err and ("rate" in err.lower() or "429" in err):
+          self._last_api_call += 30  # extra cooldown after rate limit
         self._current_id = None
         with self._lock:
           if req_id in self._requests:
@@ -85,9 +93,6 @@ class PlateReader:
     if not self.api_key:
       return None
     now = time.time()
-    if now - self._last_call < self._min_interval:
-      return None
-    self._last_call = now
     with self._lock:
       req_id = self._next_id
       self._next_id += 1
@@ -166,8 +171,11 @@ class PlateReader:
             "raw": content
           }, None
         elif r.status_code == 429 and attempt < max_retries:
-          backoff = 3 * (attempt + 1)
+          backoff = 5 * (attempt + 1)
           time.sleep(backoff)
+          continue
+        elif r.status_code == 404 and attempt < max_retries:
+          time.sleep(3)
           continue
         else:
           err_msg = f"HTTP {r.status_code}"
@@ -187,6 +195,6 @@ class PlateReader:
         return None, "Request timed out"
       except requests.ConnectionError:
         return None, "Connection error"
-      except Exception:
-        return None, "Unexpected error"
+      except Exception as e:
+        return None, f"Unexpected error: {e}"
     return None, "Rate limited after retries"

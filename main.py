@@ -348,13 +348,23 @@ def engine_loop(config, camera, detector, plate_reader, logger, location_obj, br
       if crop.size == 0:
         crop = raw
 
+      # Save snap immediately
+      if config.get("save_snaps"):
+        snaps_dir = config.get("snaps_dir", "data/snaps")
+        os.makedirs(snaps_dir, exist_ok=True)
+        fname = f"{time.strftime('%Y-%m-%d_%H-%M-%S')}-capture.jpg"
+        cv2.imwrite(os.path.join(snaps_dir, fname), raw,
+                    [cv2.IMWRITE_JPEG_QUALITY, config.get("snap_quality", 85)])
+      else:
+        fname = None
+
       if not plate_reader or not plate_reader.api_key:
         continue
 
-      capture_info = {"raw_frame": raw}
+      capture_info = {"raw_frame": raw.copy(), "snap_filename": fname}
       crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
       pil_image = Image.fromarray(crop_rgb)
-      plate_reader.queue_plate(pil_image, callback=lambda ai_result: log_ai_result(config, logger, location_obj, broadcast_func, ai_result, capture_info))
+      plate_reader.queue_plate(pil_image, callback=lambda ai_result, ci=capture_info: log_ai_result(config, logger, location_obj, broadcast_func, ai_result, ci))
 
   camera.stop()
   logger.close()
