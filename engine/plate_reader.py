@@ -9,7 +9,7 @@ class PlateReader:
     self.api_key = config.get("openrouter_api_key", "")
     self.model = config.get("openrouter_model", "openrouter/free")
     self._last_call = 0
-    self._min_interval = 2.0
+    self._min_interval = 5.0
     self._req_queue = queue.Queue(maxsize=20)
     self._worker = None
     self._running = False
@@ -61,13 +61,16 @@ class PlateReader:
             self._requests[req_id]["status"] = "processing"
             self._requests[req_id]["started_at"] = time.time()
         self._notify()
-        result = self._do_read_plate(pil_image)
+        result, err = self._do_read_plate(pil_image)
         self._current_id = None
         with self._lock:
           if req_id in self._requests:
-            if result is None:
+            if err:
               self._requests[req_id]["status"] = "error"
-              self._requests[req_id]["error"] = "API request failed"
+              self._requests[req_id]["error"] = err
+            elif result is None:
+              self._requests[req_id]["status"] = "error"
+              self._requests[req_id]["error"] = "AI returned no result"
             else:
               self._requests[req_id]["status"] = "completed"
               self._requests[req_id]["result"] = result
@@ -118,7 +121,7 @@ class PlateReader:
 
   def _do_read_plate(self, pil_image):
     if not self.api_key:
-      return None
+      return None, "No API key configured"
 
     b64 = self._encode_image(pil_image)
     payload = {
@@ -136,31 +139,54 @@ class PlateReader:
       "max_tokens": 200
     }
 
-    try:
-      r = requests.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        headers={
-          "Authorization": f"Bearer {self.api_key}",
-          "Content-Type": "application/json",
-          "HTTP-Referer": "https://github.com/car-logger",
-          "X-Title": "Car Security Logger"
-        },
-        json=payload,
-        timeout=30
-      )
-      if r.status_code != 200:
-        return None
-      data = r.json()
-      content = data["choices"][0]["message"]["content"]
-      parsed = json.loads(content)
-      return {
-        "is_car": parsed.get("is_car", False),
-        "plate": parsed["plate"].strip().upper() if parsed.get("plate") else None,
-        "color": parsed.get("color", ""),
-        "make": parsed.get("make", ""),
-        "confidence": parsed.get("confidence", "none"),
-        "raw": content
-      }
-    except Exception:
-      pass
-    return None
+    headers = {
+      "Authorization": f"Bearer {self.api_key}",
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://github.com/car-logger",
+      "X-Title": "Car Security Logger"
+    }
+
+    max_retries = 2
+    for attempt in range(max_retries + 1):
+      try:
+        r = requests.post(
+          "https://openrouter.ai/api/v1/chat/completions",
+          headers=headers, json=payload, timeout=60
+        )
+        if r.status_code == 200:
+          data = r.json()
+          content = data["choices"][0]["message"]["content"]
+          parsed = json.loads(content)
+          return {
+            "is_car": parsed.get("is_car", False),
+            "plate": parsed["plate"].strip().upper() if parsed.get("plate") else None,
+            "color": parsed.get("color", ""),
+            "make": parsed.get("make", ""),
+            "confidence": parsed.get("confidence", "none"),
+            "raw": content
+          }, None
+        elif r.status_code == 429 and attempt < max_retries:
+          backoff = 3 * (attempt + 1)
+          time.sleep(backoff)
+          continue
+        else:
+          err_msg = f"HTTP {r.status_code}"
+          if r.status_code == 429:
+            err_msg = "Rate limited (upstream busy)"
+          elif r.status_code >= 500:
+            err_msg = "Server error"
+          try:
+            body = r.json()
+            m = body.get("error", {}).get("message", "")
+            if m:
+              err_msg += f": {m[:120]}"
+          except:
+            pass
+          return None, err_msg
+      except requests.Timeout:
+        return None, "Request timed out"
+      except requests.ConnectionError:
+        return None, "Connection error"
+      except Exception:
+        return None, "Unexpected error"
+    return None, "Rate limited after retries"
