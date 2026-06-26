@@ -2,17 +2,22 @@
 set -e
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$REPO_DIR"
 
-echo "  🚗 Installing Car Logger..."
+echo "  🚗 Car Logger - One-Click Install"
+echo "  ────────────────────────────────"
 
-sudo ln -sf "$REPO_DIR/carlogger" /usr/local/bin/carlogger
-echo "  ✅ Command 'carlogger' installed (type it anywhere)"
+echo "  📦 Installing system dependencies..."
+sudo apt update -qq
+sudo apt install -y -qq python3-opencv python3-pip geoclue-2.0 > /dev/null 2>&1
+
+echo "  📦 Installing Python packages..."
+pip3 install -q -r requirements.txt --break-system-packages 2>/dev/null || pip3 install -q -r requirements.txt
+
+echo "  🔗 Installing command..."
+sudo ln -sf "$(pwd)/carlogger" /usr/local/bin/carlogger
 
 echo ""
-echo "  ──────────────────────────────────────"
-echo "  Ready! Just run:"
-echo "    carlogger"
+echo "  ✅ All done! Launching Car Logger..."
 echo ""
-echo "  First run will open the dashboard."
-echo "  Paste your OpenRouter API key in Settings."
-echo "  ──────────────────────────────────────"
+carlogger
