@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Car Security Logger</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="logo">🚗 Car Logger</div>
+    <div class="topbar-right">
+      <span class="indicator" id="indicator-camera">📷 <span>Starting...</span></span>
+      <span class="indicator" id="indicator-ai">🤖 <span>AI: --</span></span>
+      <span class="indicator" id="indicator-loc">📍 <span>Loc: --</span></span>
+      <a href="/settings" class="btn-icon">⚙</a>
+    </div>
+  </header>
+
+  <div class="main">
+    <div class="feed-panel">
+      <div class="feed-header">
+        <h2>Live Feed</h2>
+        <div class="feed-badges">
+          <span class="badge" id="badge-status">⏳</span>
+          <span class="badge" id="badge-cars">🚘 0</span>
+        </div>
+      </div>
+      <div class="feed-container">
+        <img id="live-feed" src="/video_feed" alt="Live camera feed">
+        <div class="zone-preview" id="zone-overlay"></div>
+      </div>
+    </div>
+
+    <div class="detections-panel">
+      <div class="detections-header">
+        <h2>Detections</h2>
+        <span class="count" id="total-count">0</span>
+      </div>
+      <div class="detections-list" id="detections-list">
+        <div class="empty-state">Waiting for cars...</div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="bottombar">
+    <div class="stats">
+      <span>📊 Today: <strong id="stat-today">0</strong></span>
+      <span>🚗 Total: <strong id="stat-total">0</strong></span>
+      <span>🔤 Unique: <strong id="stat-unique">0</strong></span>
+    </div>
+    <div class="controls">
+      <a href="/history" class="btn">📋 History</a>
+      <a href="/settings" class="btn">⚙ Settings</a>
+    </div>
+  </footer>
+</div>
+
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script src="/static/js/app.js"></script>
+</body>
+</html>

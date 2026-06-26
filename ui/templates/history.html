@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>History - Car Logger</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="logo">🚗 Car Logger</div>
+    <div class="topbar-right">
+      <a href="/" class="btn-icon">⌂</a>
+    </div>
+  </header>
+
+  <div class="history-page">
+    <h1>📋 Detection History</h1>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Search by plate..." class="input" style="flex:1">
+      <button class="btn primary" id="btn-search">🔍</button>
+      <button class="btn" id="btn-refresh">🔄</button>
+    </div>
+    <div class="history-table-wrap">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Plate</th>
+            <th>Timestamp</th>
+            <th>Vehicle</th>
+            <th>Location</th>
+            <th>Image</th>
+          </tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </div>
+    <div class="history-loading" id="history-loading">Loading...</div>
+  </div>
+</div>
+
+<script>
+async function loadHistory(search) {
+  document.getElementById("history-loading").style.display = "block";
+  let url = "/api/history?limit=200";
+  if (search) url += "&search=" + encodeURIComponent(search);
+  const r = await fetch(url);
+  const rows = await r.json();
+  const tbody = document.getElementById("history-body");
+  tbody.innerHTML = "";
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="5" class="empty">No detections yet</td></tr>';
+  } else {
+    for (const row of rows) {
+      const tr = document.createElement("tr");
+      const imgFile = row.image_path ? row.image_path.split("/").pop() : null;
+      tr.innerHTML = '<td class="plate-cell">' + row.plate + '</td>' +
+        '<td class="ts-cell">' + (row.timestamp || row.created_at) + '</td>' +
+        '<td>' + (row.vehicle_info || "--") + '</td>' +
+        '<td>' + (row.latitude ? row.latitude.toFixed(4) + ", " + row.longitude.toFixed(4) : "--") + '</td>' +
+        '<td>' + (row.image_path ? '<a href="/snaps/' + imgFile + '" target="_blank">📷 View</a>' : "--") + '</td>';
+      tbody.appendChild(tr);
+    }
+  }
+  document.getElementById("history-loading").style.display = "none";
+}
+
+document.getElementById("btn-search").addEventListener("click", function() {
+  loadHistory(document.getElementById("search-input").value);
+});
+document.getElementById("search-input").addEventListener("keyup", function(e) {
+  if (e.key === "Enter") loadHistory(e.target.value);
+});
+document.getElementById("btn-refresh").addEventListener("click", function() { loadHistory(); });
+loadHistory();
+</script>
+</body>
+</html>
